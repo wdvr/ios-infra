@@ -6,11 +6,12 @@ Shared CI/CD infrastructure for iOS apps.
 
 This repository contains reusable GitHub Actions workflows, scripts, and shared code for iOS app development and deployment.
 
-## Apps Using This Infrastructure
+## Features
 
-- **Trivit** - Tally counter app
-- **Powder Chaser** - Ski resort snow tracker
-- **Footprint** - Travel tracking app
+- Reusable GitHub Actions workflows for iOS CI/CD
+- AI-powered release notes and App Store description generation
+- Shared Swift Package for Firebase Analytics integration
+- Fastlane templates for screenshots and App Store uploads
 
 ## Quick Start
 
@@ -71,10 +72,7 @@ Or in Xcode: File > Add Package Dependencies > Enter repository URL.
 
 ## Configuration
 
-All apps share:
-- **Team ID**: YOUR_TEAM_ID
-- **App Store Connect Key**: GA9T4G84AU
-- **App Store Connect Issuer**: 39f22957-9a03-421a-ada6-86471b32ee9f
+All apps share the same Apple Developer Team and App Store Connect credentials. Configure these values in your `ios-infra` workflows or as environment variables.
 
 ### Required Secrets
 
@@ -101,9 +99,9 @@ Configure these secrets in each app repository that uses the shared workflows.
 
 ```bash
 # Set secrets using GitHub CLI
-gh secret set APP_STORE_CONNECT_KEY_ID --body "GA9T4G84AU" --repo OWNER/REPO
-gh secret set APP_STORE_CONNECT_ISSUER_ID --body "39f22957-9a03-421a-ada6-86471b32ee9f" --repo OWNER/REPO
-gh secret set APP_STORE_CONNECT_PRIVATE_KEY < ~/.private_keys/AuthKey_GA9T4G84AU.p8 --repo OWNER/REPO
+gh secret set APP_STORE_CONNECT_KEY_ID --body "YOUR_KEY_ID" --repo OWNER/REPO
+gh secret set APP_STORE_CONNECT_ISSUER_ID --body "YOUR_ISSUER_ID" --repo OWNER/REPO
+gh secret set APP_STORE_CONNECT_PRIVATE_KEY < ~/.private_keys/AuthKey_YOUR_KEY_ID.p8 --repo OWNER/REPO
 ```
 
 #### 2. Distribution Certificate
@@ -143,21 +141,11 @@ If you have secrets configured in one repo, you can copy them to another:
 
 ```bash
 # List secrets from source repo
-gh secret list --repo wdvr/footprint
+gh secret list --repo OWNER/SOURCE_REPO
 
 # Copy each secret (requires reading the value from a secure location)
 # Note: You cannot read secret values from GitHub, only set them
 ```
-
-For our repos, the secrets are already configured in `wdvr/footprint`. Contact Wouter for access.
-
-### Current Secret Status
-
-| Repo | Secrets Configured |
-|------|-------------------|
-| BalloonInc/trivit-ios | Yes |
-| wdvr/snow | Yes |
-| wdvr/footprint | Yes |
 
 ## License
 
