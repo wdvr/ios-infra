@@ -260,21 +260,22 @@ jobs:
       run: |
         set -euo pipefail
 
-        # Validate required secrets
+        # Check if certificate secrets are provided
         if [ -z "${DISTRIBUTION_CERTIFICATE_BASE64:-}" ]; then
-          echo "::error::DISTRIBUTION_CERTIFICATE_BASE64 secret is not set or empty"
-          exit 1
+          echo "::warning::DISTRIBUTION_CERTIFICATE_BASE64 not provided - will rely on automatic signing"
+          echo "If build fails with signing errors, you need to set up certificate secrets"
+          exit 0
         fi
         if [ -z "${DISTRIBUTION_CERTIFICATE_PASSWORD:-}" ]; then
-          echo "::error::DISTRIBUTION_CERTIFICATE_PASSWORD secret is not set or empty"
-          exit 1
+          echo "::warning::DISTRIBUTION_CERTIFICATE_PASSWORD not provided - skipping certificate installation"
+          exit 0
         fi
         if [ -z "${KEYCHAIN_PASSWORD:-}" ]; then
-          echo "::error::KEYCHAIN_PASSWORD secret is not set or empty"
-          exit 1
+          # Generate a random keychain password if not provided
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
         fi
 
-        echo "Secrets validated, proceeding with certificate installation..."
+        echo "Certificate secrets provided, proceeding with installation..."
         echo "Certificate base64 length: ${#DISTRIBUTION_CERTIFICATE_BASE64} chars"
 
         KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
