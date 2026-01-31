@@ -77,6 +77,10 @@ on:
       ANTHROPIC_API_KEY:
         required: false
 
+permissions:
+  actions: read
+  contents: write
+
 env:
   TEAM_ID: 'YOUR_TEAM_ID'
 
