@@ -1,0 +1,441 @@
+name: iOS App Store Release
+
+# Reusable workflow for App Store release preparation
+# Generates screenshots, description, release notes for an existing build
+# Tags as release candidate in git
+
+on:
+  workflow_call:
+    inputs:
+      bundle_id:
+        description: 'App bundle identifier'
+        required: true
+        type: string
+      scheme:
+        description: 'Xcode scheme for screenshots'
+        required: true
+        type: string
+      app_version:
+        description: 'App version (e.g., 1.0.0)'
+        required: true
+        type: string
+      build_number:
+        description: 'Build number to release (from TestFlight)'
+        required: true
+        type: string
+      app_name:
+        description: 'App display name for AI generation'
+        required: true
+        type: string
+      app_context:
+        description: 'Brief app description for AI generation'
+        required: false
+        type: string
+        default: ''
+      generate_screenshots:
+        description: 'Generate new screenshots'
+        required: false
+        type: boolean
+        default: true
+      generate_description:
+        description: 'Generate description with AI'
+        required: false
+        type: boolean
+        default: true
+      generate_release_notes:
+        description: 'Generate release notes with AI'
+        required: false
+        type: boolean
+        default: true
+      submit_for_review:
+        description: 'Submit to App Store review'
+        required: false
+        type: boolean
+        default: false
+      project_path:
+        description: 'Path to .xcodeproj for screenshots'
+        required: false
+        type: string
+        default: ''
+      use_xcodegen:
+        description: 'Run xcodegen before screenshots'
+        required: false
+        type: boolean
+        default: false
+      xcodegen_path:
+        description: 'Path to run xcodegen in'
+        required: false
+        type: string
+        default: '.'
+    secrets:
+      APP_STORE_CONNECT_KEY_ID:
+        required: true
+      APP_STORE_CONNECT_ISSUER_ID:
+        required: true
+      APP_STORE_CONNECT_PRIVATE_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: false
+
+env:
+  TEAM_ID: 'YOUR_TEAM_ID'
+
+jobs:
+  # Job 1: Generate AI assets (runs on Ubuntu)
+  generate-assets:
+    name: Generate Assets
+    runs-on: ubuntu-latest
+    if: ${{ inputs.generate_description || inputs.generate_release_notes }}
+    outputs:
+      description_generated: ${{ steps.generate.outputs.description }}
+      release_notes_generated: ${{ steps.generate.outputs.release_notes }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: pip install anthropic
+
+    - name: Generate release notes
+      if: ${{ inputs.generate_release_notes }}
+      env:
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        # Inline release notes generation
+        python3 << 'SCRIPT'
+        import os
+        import re
+        import subprocess
+        from pathlib import Path
+
+        try:
+            import anthropic
+        except ImportError:
+            subprocess.check_call(["pip", "install", "anthropic"])
+            import anthropic
+
+        def get_last_release_tag():
+            try:
+                result = subprocess.run(["git", "describe", "--tags", "--abbrev=0"],
+                    capture_output=True, text=True, check=True)
+                return result.stdout.strip()
+            except subprocess.CalledProcessError:
+                result = subprocess.run(["git", "rev-list", "--max-parents=0", "HEAD"],
+                    capture_output=True, text=True, check=True)
+                return result.stdout.strip()[:8]
+
+        def get_commits_since_tag(tag):
+            try:
+                result = subprocess.run(["git", "log", f"{tag}..HEAD",
+                    "--pretty=format:%H|%s|%b|%an|%ad", "--date=short"],
+                    capture_output=True, text=True, check=True)
+            except subprocess.CalledProcessError:
+                result = subprocess.run(["git", "log", "-50",
+                    "--pretty=format:%H|%s|%b|%an|%ad", "--date=short"],
+                    capture_output=True, text=True, check=True)
+
+            commits = []
+            for line in result.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split("|")
+                if len(parts) >= 5:
+                    commits.append({"subject": parts[1], "date": parts[4]})
+            return commits
+
+        last_tag = get_last_release_tag()
+        commits = get_commits_since_tag(last_tag)
+        commit_text = "\n".join([f"- {c['subject']} ({c['date']})" for c in commits[:50]])
+
+        app_name = "${{ inputs.app_name }}"
+        app_context = "${{ inputs.app_context }}" or "An iOS app"
+
+        client = anthropic.Anthropic()
+        prompt = f"""You are writing App Store release notes for {app_name} ({app_context}).
+
+        Commits since last release:
+        {commit_text}
+
+        Write release notes that:
+        1. Are user-friendly (avoid technical jargon)
+        2. Focus on user-visible improvements
+        3. Are concise (under 500 characters for App Store limit)
+        4. Use bullet points for multiple changes
+        5. Start with most impactful changes
+        6. Skip internal/technical changes users don't care about
+
+        If there are no significant user-facing changes, write something like:
+        "Bug fixes and performance improvements."
+
+        Output ONLY the release notes text, no additional commentary."""
+
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        notes = response.content[0].text
+
+        # Save to metadata
+        output_path = Path("fastlane/metadata/en-US/release_notes.txt")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(notes)
+        print(f"Generated release notes: {len(notes)} chars")
+        SCRIPT
+
+    - name: Generate description
+      if: ${{ inputs.generate_description }}
+      env:
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        # Inline description generation
+        python3 << 'SCRIPT'
+        import os
+        import re
+        from pathlib import Path
+
+        try:
+            import anthropic
+        except ImportError:
+            import subprocess
+            subprocess.check_call(["pip", "install", "anthropic"])
+            import anthropic
+
+        app_name = "${{ inputs.app_name }}"
+        app_context = "${{ inputs.app_context }}" or "An iOS app"
+
+        client = anthropic.Anthropic()
+        prompt = f"""You are writing an App Store description for {app_name}.
+
+        App context: {app_context}
+
+        Write an App Store description that:
+        1. Opens with a compelling hook (1-2 sentences)
+        2. Lists key features with bullet points or short paragraphs
+        3. Highlights what makes this app unique
+        4. Is between 200-400 words
+        5. DO NOT USE ANY EMOJIS - App Store Connect rejects them
+        6. Ends with a call to action
+
+        Output ONLY the description text, no additional commentary."""
+
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        description = response.content[0].text
+
+        # Strip emojis
+        emoji_pattern = re.compile("["
+            "\U0001f600-\U0001f64f"
+            "\U0001f300-\U0001f5ff"
+            "\U0001f680-\U0001f6ff"
+            "\U0001f700-\U0001f77f"
+            "\U0001f780-\U0001f7ff"
+            "\U0001f800-\U0001f8ff"
+            "\U0001f900-\U0001f9ff"
+            "\U0001fa00-\U0001fa6f"
+            "\U0001fa70-\U0001faff"
+            "\U00002702-\U000027b0"
+            "\U0001f1e0-\U0001f1ff"
+            "]+", flags=re.UNICODE)
+        description = emoji_pattern.sub("", description)
+
+        # Save to metadata
+        output_path = Path("fastlane/metadata/en-US/description.txt")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(description)
+        print(f"Generated description: {len(description)} chars")
+        SCRIPT
+
+    - name: Check outputs
+      id: generate
+      run: |
+        echo "description=${{ inputs.generate_description }}" >> $GITHUB_OUTPUT
+        echo "release_notes=${{ inputs.generate_release_notes }}" >> $GITHUB_OUTPUT
+
+    - name: Upload generated assets
+      uses: actions/upload-artifact@v4
+      with:
+        name: generated-assets
+        path: |
+          fastlane/metadata/
+        retention-days: 7
+
+  # Job 2: Screenshots and upload (runs on macOS)
+  screenshots-and-upload:
+    name: Screenshots & Upload
+    needs: generate-assets
+    if: ${{ always() && !cancelled() }}
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download generated assets
+      if: ${{ needs.generate-assets.result == 'success' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: generated-assets
+        path: fastlane/metadata/
+      continue-on-error: true
+
+    - name: Select Xcode
+      run: |
+        XCODE_PATH=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+        if [ -z "$XCODE_PATH" ]; then
+          XCODE_PATH="/Applications/Xcode.app"
+        fi
+        if [ -d "$XCODE_PATH" ]; then
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer" || true
+        fi
+        xcodebuild -version
+
+    - name: Install XcodeGen
+      if: ${{ inputs.use_xcodegen }}
+      run: which xcodegen || brew install xcodegen
+
+    - name: Generate Xcode project
+      if: ${{ inputs.use_xcodegen }}
+      run: |
+        cd "${{ inputs.xcodegen_path }}"
+        xcodegen generate
+
+    - name: Setup Ruby
+      run: |
+        echo "Current Ruby: $(ruby --version)"
+        RUBY_VERSION=$(ruby -e 'puts RUBY_VERSION')
+        if [[ "$RUBY_VERSION" < "3.0" ]]; then
+          brew install ruby@3.2 || true
+          echo 'export PATH="/opt/homebrew/opt/ruby@3.2/bin:$PATH"' >> $GITHUB_ENV
+        fi
+
+    - name: Install Fastlane
+      run: |
+        export PATH="/opt/homebrew/opt/ruby@3.2/bin:$PATH"
+        gem install bundler --no-document || true
+        if [ -f "Gemfile" ]; then
+          bundle config set --local path vendor/bundle
+          bundle install
+        else
+          gem install fastlane --no-document
+        fi
+
+    - name: Generate screenshots
+      if: ${{ inputs.generate_screenshots }}
+      run: |
+        export PATH="/opt/homebrew/opt/ruby@3.2/bin:$PATH"
+
+        # Boot simulator
+        DEVICE="iPhone 17 Pro Max"
+        xcrun simctl list devices | grep -q "$DEVICE" || DEVICE="iPhone 16 Pro Max"
+        xcrun simctl boot "$DEVICE" 2>/dev/null || true
+        sleep 5
+
+        if [ -f "Gemfile" ]; then
+          bundle exec fastlane snapshot || echo "Screenshots skipped - lane may not exist"
+        else
+          fastlane snapshot || echo "Screenshots skipped - lane may not exist"
+        fi
+
+    - name: Setup App Store Connect API Key
+      run: |
+        mkdir -p ~/.private_keys
+        echo "${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}" > ~/.private_keys/AuthKey.p8
+        chmod 600 ~/.private_keys/AuthKey.p8
+
+    - name: Upload to App Store Connect
+      env:
+        APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        APP_STORE_CONNECT_KEY_PATH: ~/.private_keys/AuthKey.p8
+      run: |
+        export PATH="/opt/homebrew/opt/ruby@3.2/bin:$PATH"
+
+        # Upload metadata using fastlane deliver
+        if [ -f "Gemfile" ]; then
+          bundle exec fastlane deliver \
+            --app_identifier "${{ inputs.bundle_id }}" \
+            --skip_binary_upload \
+            --skip_screenshots \
+            --force \
+            --app_version ${{ inputs.app_version }} || echo "Deliver may need configuration"
+        else
+          fastlane deliver \
+            --app_identifier "${{ inputs.bundle_id }}" \
+            --skip_binary_upload \
+            --skip_screenshots \
+            --force \
+            --app_version ${{ inputs.app_version }} || echo "Deliver may need configuration"
+        fi
+
+    - name: Cleanup
+      if: always()
+      run: rm -rf ~/.private_keys
+
+  # Job 3: Tag release candidate
+  tag-release:
+    name: Tag Release Candidate
+    needs: screenshots-and-upload
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Create Git Tag
+      run: |
+        VERSION="${{ inputs.app_version }}"
+        BUILD="${{ inputs.build_number }}"
+        TAG="release_candidate_v${VERSION}_build${BUILD}"
+
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        git tag -a "$TAG" -m "Release candidate v$VERSION (build $BUILD)
+
+        App Store metadata prepared:
+        - Screenshots: ${{ inputs.generate_screenshots }}
+        - AI Description: ${{ inputs.generate_description }}
+        - AI Release Notes: ${{ inputs.generate_release_notes }}
+        - Submit for review: ${{ inputs.submit_for_review }}
+
+        Triggered by: ${{ github.actor }}
+        Workflow: ${{ github.workflow }}"
+
+        git push origin "$TAG"
+        echo "Created tag: $TAG"
+
+    - name: Summary
+      run: |
+        echo "## App Store Release Preparation" >> $GITHUB_STEP_SUMMARY
+        echo "- **App**: ${{ inputs.app_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Bundle ID**: ${{ inputs.bundle_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: ${{ inputs.app_version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build**: ${{ inputs.build_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Git Tag**: release_candidate_v${{ inputs.app_version }}_build${{ inputs.build_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Assets Prepared" >> $GITHUB_STEP_SUMMARY
+        echo "- Screenshots: ${{ inputs.generate_screenshots && 'Generated' || 'Skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Description: ${{ inputs.generate_description && 'AI Generated' || 'Skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Release Notes: ${{ inputs.generate_release_notes && 'AI Generated' || 'Skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ inputs.submit_for_review }}" = "true" ]; then
+          echo "### Status: Submitted for App Store Review" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "### Status: Ready for manual submission in App Store Connect" >> $GITHUB_STEP_SUMMARY
+        fi

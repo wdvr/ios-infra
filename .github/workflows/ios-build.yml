@@ -1,0 +1,364 @@
+name: iOS Build
+
+# Reusable workflow for building and archiving iOS apps
+# Creates signed IPA artifact for later deployment
+
+on:
+  workflow_call:
+    inputs:
+      bundle_id:
+        description: 'App bundle identifier (e.g., com.yourcompany.yourapp)'
+        required: true
+        type: string
+      scheme:
+        description: 'Xcode scheme name'
+        required: true
+        type: string
+      project_path:
+        description: 'Path to .xcodeproj file (optional, will auto-detect)'
+        required: false
+        type: string
+        default: ''
+      workspace_path:
+        description: 'Path to .xcworkspace file (if using workspace instead of project)'
+        required: false
+        type: string
+        default: ''
+      use_xcodegen:
+        description: 'Run xcodegen before building'
+        required: false
+        type: boolean
+        default: false
+      xcodegen_path:
+        description: 'Path to run xcodegen in (relative to repo root)'
+        required: false
+        type: string
+        default: '.'
+      info_plist_path:
+        description: 'Path to Info.plist for version extraction'
+        required: false
+        type: string
+        default: ''
+      additional_info_plists:
+        description: 'Additional Info.plist paths to update (comma-separated)'
+        required: false
+        type: string
+        default: ''
+      use_self_hosted:
+        description: 'Prefer self-hosted runners'
+        required: false
+        type: boolean
+        default: false
+      enable_fallback:
+        description: 'Fall back to GitHub-hosted if self-hosted unavailable'
+        required: false
+        type: boolean
+        default: true
+      runner:
+        description: 'Specific runner to use (overrides self-hosted logic)'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      build_number:
+        description: 'The build number used'
+        value: ${{ jobs.build.outputs.build_number }}
+      version:
+        description: 'The marketing version'
+        value: ${{ jobs.build.outputs.version }}
+      artifact_name:
+        description: 'Name of the uploaded artifact'
+        value: ${{ jobs.build.outputs.artifact_name }}
+    secrets:
+      APP_STORE_CONNECT_KEY_ID:
+        required: true
+      APP_STORE_CONNECT_ISSUER_ID:
+        required: true
+      APP_STORE_CONNECT_PRIVATE_KEY:
+        required: true
+      DISTRIBUTION_CERTIFICATE_BASE64:
+        required: true
+      DISTRIBUTION_CERTIFICATE_PASSWORD:
+        required: true
+      KEYCHAIN_PASSWORD:
+        required: true
+
+env:
+  TEAM_ID: 'YOUR_TEAM_ID'
+
+jobs:
+  # Check runner availability (only if using self-hosted strategy)
+  runner-strategy:
+    name: Check Runner Availability
+    runs-on: ubuntu-latest
+    if: ${{ inputs.use_self_hosted && inputs.runner == '' }}
+    outputs:
+      runner: ${{ steps.check.outputs.runner }}
+      runner-label: ${{ steps.check.outputs.runner-label }}
+    steps:
+    - name: Check self-hosted runner availability
+      id: check
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        echo "Checking for self-hosted runners..."
+        RUNNERS=$(gh api repos/${{ github.repository }}/actions/runners --jq '.runners[] | select(.status=="online") | select(.labels[].name=="macOS" or .labels[].name=="self-hosted") | .name' 2>/dev/null || echo "")
+
+        if [ -n "$RUNNERS" ]; then
+          echo "Found online self-hosted runner(s): $RUNNERS"
+          echo "runner=self-hosted" >> $GITHUB_OUTPUT
+          echo "runner-label=self-hosted" >> $GITHUB_OUTPUT
+        else
+          echo "No self-hosted runners available"
+          if [ "${{ inputs.enable_fallback }}" == "true" ]; then
+            echo "Falling back to GitHub-hosted runner"
+            echo "runner=macos-15" >> $GITHUB_OUTPUT
+            echo "runner-label=github-hosted-fallback" >> $GITHUB_OUTPUT
+          else
+            echo "runner=self-hosted" >> $GITHUB_OUTPUT
+            echo "runner-label=self-hosted-required" >> $GITHUB_OUTPUT
+          fi
+        fi
+
+  build:
+    name: Build & Archive
+    needs: [runner-strategy]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (needs.runner-strategy.outputs.runner == 'self-hosted' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'macos-15') }}
+    timeout-minutes: 30
+    outputs:
+      build_number: ${{ steps.version.outputs.build }}
+      version: ${{ steps.version.outputs.version }}
+      artifact_name: ${{ steps.artifact.outputs.name }}
+
+    steps:
+    - name: Runner Info
+      run: |
+        echo "Runner: ${{ inputs.runner || needs.runner-strategy.outputs.runner-label || 'github-hosted' }}"
+        echo "OS: $(uname -s) $(uname -r)"
+        echo "Arch: $(uname -m)"
+        echo "Host: $(hostname)"
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Select Xcode
+      run: |
+        # Find and select Xcode (prefer Xcode 26.x, fall back to latest)
+        XCODE_PATH=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+        if [ -z "$XCODE_PATH" ]; then
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+        fi
+        if [ -z "$XCODE_PATH" ]; then
+          XCODE_PATH="/Applications/Xcode.app"
+        fi
+
+        if [ -d "$XCODE_PATH" ]; then
+          echo "Using Xcode: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer" || true
+        else
+          echo "Using default Xcode"
+        fi
+        xcodebuild -version
+
+    - name: Install XcodeGen
+      if: ${{ inputs.use_xcodegen }}
+      run: which xcodegen || brew install xcodegen
+
+    - name: Generate Xcode project
+      if: ${{ inputs.use_xcodegen }}
+      run: |
+        cd "${{ inputs.xcodegen_path }}"
+        xcodegen generate
+
+    - name: Detect project/workspace
+      id: detect
+      run: |
+        # Determine project or workspace path
+        if [ -n "${{ inputs.workspace_path }}" ]; then
+          echo "build_flag=-workspace" >> $GITHUB_OUTPUT
+          echo "build_path=${{ inputs.workspace_path }}" >> $GITHUB_OUTPUT
+        elif [ -n "${{ inputs.project_path }}" ]; then
+          echo "build_flag=-project" >> $GITHUB_OUTPUT
+          echo "build_path=${{ inputs.project_path }}" >> $GITHUB_OUTPUT
+        else
+          # Auto-detect: prefer workspace, then project
+          WORKSPACE=$(find . -maxdepth 2 -name "*.xcworkspace" -not -path "*/Pods/*" | head -1)
+          PROJECT=$(find . -maxdepth 2 -name "*.xcodeproj" | head -1)
+
+          if [ -n "$WORKSPACE" ]; then
+            echo "build_flag=-workspace" >> $GITHUB_OUTPUT
+            echo "build_path=$WORKSPACE" >> $GITHUB_OUTPUT
+          elif [ -n "$PROJECT" ]; then
+            echo "build_flag=-project" >> $GITHUB_OUTPUT
+            echo "build_path=$PROJECT" >> $GITHUB_OUTPUT
+          else
+            echo "ERROR: No Xcode project or workspace found"
+            exit 1
+          fi
+        fi
+
+    - name: Resolve Swift Package Dependencies
+      run: |
+        xcodebuild -resolvePackageDependencies \
+          ${{ steps.detect.outputs.build_flag }} "${{ steps.detect.outputs.build_path }}" \
+          -scheme "${{ inputs.scheme }}"
+
+    - name: Calculate build number
+      id: version
+      run: |
+        # Use commit count as build number for deterministic builds
+        BUILD=$(git rev-list --count HEAD)
+
+        # Find Info.plist
+        if [ -n "${{ inputs.info_plist_path }}" ]; then
+          PLIST="${{ inputs.info_plist_path }}"
+        else
+          # Auto-detect Info.plist
+          PLIST=$(find . -name "Info.plist" -not -path "*/Pods/*" -not -path "*/.build/*" -not -path "*/DerivedData/*" | head -1)
+        fi
+
+        if [ -n "$PLIST" ] && [ -f "$PLIST" ]; then
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "1.0.0")
+
+          # Update build number in main plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD" "$PLIST"
+        else
+          VERSION="1.0.0"
+        fi
+
+        # Update additional plists (e.g., watch app, widgets)
+        IFS=',' read -ra EXTRA_PLISTS <<< "${{ inputs.additional_info_plists }}"
+        for extra in "${EXTRA_PLISTS[@]}"; do
+          extra=$(echo "$extra" | xargs)  # Trim whitespace
+          if [ -n "$extra" ] && [ -f "$extra" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$extra" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$extra" 2>/dev/null || true
+          fi
+        done
+
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "build=$BUILD" >> $GITHUB_OUTPUT
+        echo "Building version $VERSION ($BUILD)"
+
+    - name: Setup App Store Connect API Key
+      if: github.event_name != 'pull_request'
+      run: |
+        mkdir -p $RUNNER_TEMP/private_keys
+        echo "${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}" | tr -d '\r' > $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+        chmod 600 $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+
+    - name: Install certificates
+      if: github.event_name != 'pull_request'
+      env:
+        DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.DISTRIBUTION_CERTIFICATE_BASE64 }}
+        DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.DISTRIBUTION_CERTIFICATE_PASSWORD }}
+        KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      run: |
+        KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+        security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+        echo -n "$DISTRIBUTION_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+        security import $CERTIFICATE_PATH -P "$DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+        security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        security list-keychain -d user -s $KEYCHAIN_PATH login.keychain-db
+
+    - name: Build (PR - no signing)
+      if: github.event_name == 'pull_request'
+      run: |
+        xcodebuild build \
+          ${{ steps.detect.outputs.build_flag }} "${{ steps.detect.outputs.build_path }}" \
+          -scheme "${{ inputs.scheme }}" \
+          -configuration Release \
+          -destination 'generic/platform=iOS' \
+          CODE_SIGNING_ALLOWED=NO
+
+    - name: Archive app
+      if: github.event_name != 'pull_request'
+      run: |
+        xcodebuild archive \
+          ${{ steps.detect.outputs.build_flag }} "${{ steps.detect.outputs.build_path }}" \
+          -scheme "${{ inputs.scheme }}" \
+          -configuration Release \
+          -archivePath $RUNNER_TEMP/Export/App.xcarchive \
+          -destination 'generic/platform=iOS' \
+          -allowProvisioningUpdates \
+          -authenticationKeyPath $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8 \
+          -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
+          -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }} \
+          CODE_SIGN_STYLE=Automatic \
+          DEVELOPMENT_TEAM=${{ env.TEAM_ID }}
+
+    - name: Create ExportOptions.plist
+      if: github.event_name != 'pull_request'
+      run: |
+        cat > /tmp/ExportOptions.plist << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${{ env.TEAM_ID }}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>destination</key>
+            <string>export</string>
+        </dict>
+        </plist>
+        EOF
+
+    - name: Export IPA
+      if: github.event_name != 'pull_request'
+      run: |
+        xcodebuild -exportArchive \
+          -archivePath $RUNNER_TEMP/Export/App.xcarchive \
+          -exportPath $RUNNER_TEMP/Export \
+          -exportOptionsPlist /tmp/ExportOptions.plist \
+          -allowProvisioningUpdates \
+          -authenticationKeyPath $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8 \
+          -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
+          -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+
+    - name: Upload IPA artifact
+      id: artifact
+      if: github.event_name != 'pull_request'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ipa-${{ steps.version.outputs.version }}-${{ steps.version.outputs.build }}
+        path: |
+          ${{ runner.temp }}/Export/*.ipa
+          ${{ runner.temp }}/Export/App.xcarchive/dSYMs
+        retention-days: 30
+
+    - name: Set artifact name output
+      if: github.event_name != 'pull_request'
+      run: echo "name=ipa-${{ steps.version.outputs.version }}-${{ steps.version.outputs.build }}" >> $GITHUB_OUTPUT
+
+    - name: Summary
+      run: |
+        echo "## Build Successful" >> $GITHUB_STEP_SUMMARY
+        echo "- **Scheme**: ${{ inputs.scheme }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Bundle ID**: ${{ inputs.bundle_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: ${{ steps.version.outputs.version }} (${{ steps.version.outputs.build }})" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ github.event_name }}" != "pull_request" ]; then
+          echo "- **Artifact**: ipa-${{ steps.version.outputs.version }}-${{ steps.version.outputs.build }}" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+        echo "Run **TestFlight Internal** workflow to upload to TestFlight." >> $GITHUB_STEP_SUMMARY
+
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -rf $RUNNER_TEMP/private_keys $RUNNER_TEMP/Export
+        security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true

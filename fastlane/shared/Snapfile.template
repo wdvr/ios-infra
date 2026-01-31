@@ -1,0 +1,108 @@
+# Snapfile template for iOS App Store screenshots
+# Copy this to your app's fastlane directory and customize as needed
+
+# ============================================
+# Device Configuration
+# ============================================
+
+# Required device sizes for App Store (2026)
+# Adjust based on your app's target devices
+devices([
+  # iPhones - Required
+  "iPhone 17 Pro Max",                   # 6.9" - Required for App Store
+  "iPhone 17 Pro",                       # 6.3" - Required for App Store
+
+  # iPhones - Optional but recommended
+  "iPhone 16e",                          # Smaller iPhone (SE successor)
+
+  # iPads - Required if app supports iPad
+  "iPad Pro 13-inch (M5)",               # 13" iPad - Required for iPad App Store
+  "iPad Pro 11-inch (M5)"                # 11" iPad - Additional iPad size
+])
+
+# Fallback devices if newer simulators not available
+# Uncomment these if you're on older Xcode:
+# devices([
+#   "iPhone 16 Pro Max",
+#   "iPhone 16 Pro",
+#   "iPhone SE (3rd generation)",
+#   "iPad Pro (13-inch) (M4)",
+#   "iPad Pro (11-inch) (M4)"
+# ])
+
+# ============================================
+# Languages
+# ============================================
+
+# Languages to generate screenshots for
+# Add more languages if your app is localized
+languages([
+  "en-US"
+  # "de-DE",
+  # "fr-FR",
+  # "es-ES",
+  # "ja",
+  # "zh-Hans"
+])
+
+# ============================================
+# Scheme & Output
+# ============================================
+
+# The name of the scheme which contains the UI Tests
+# Update this to match your app's UI test scheme
+scheme("YourAppUITests")
+
+# Where should the resulting screenshots be stored?
+output_directory("./fastlane/screenshots")
+
+# ============================================
+# Behavior Settings
+# ============================================
+
+# Clear all previously generated screenshots before creating new ones
+clear_previous_screenshots(true)
+
+# Override the status bar to show ideal time, battery, etc.
+override_status_bar(true)
+
+# Arguments to pass to the app on launch
+# These are useful for putting the app in a demo state
+launch_arguments([
+  "-ApplePersistenceIgnoreState YES",
+  "-UITestingMode YES",
+  "-DisableAnimations YES",
+  "-SampleDataMode YES"
+])
+
+# Disable slide to type on the iOS simulator
+disable_slide_to_type(true)
+
+# Stop immediately after the first test failure
+# Set to false to continue testing all devices even if one fails
+stop_after_first_error(false)
+
+# Configure whether or not to locale the simulator
+localize_simulator(true)
+
+# Build configuration for screenshots
+configuration("Debug")
+
+# ============================================
+# Advanced Options
+# ============================================
+
+# Number of retries if a screenshot fails
+# number_of_retries(0)
+
+# Reinstall the app before running screenshots
+# reinstall_app(false)
+
+# Erase the simulator before running screenshots
+# erase_simulator(false)
+
+# Clean build before running screenshots
+# clean(false)
+
+# For more information about all available options run:
+# fastlane action snapshot

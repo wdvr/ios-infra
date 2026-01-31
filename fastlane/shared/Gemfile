@@ -1,0 +1,14 @@
+# Gemfile for Fastlane
+# Copy this to your app's root or fastlane directory
+
+source "https://rubygems.org"
+
+# Fastlane and its plugins
+gem "fastlane", "~> 2.225"
+
+# Plugins
+# gem "fastlane-plugin-firebase_app_distribution"  # For Firebase App Distribution
+# gem "fastlane-plugin-versioning"                 # For version management
+
+# Required for code signing
+gem "xcode-install", "~> 2.8"
