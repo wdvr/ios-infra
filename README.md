@@ -74,20 +74,90 @@ Or in Xcode: File > Add Package Dependencies > Enter repository URL.
 All apps share:
 - **Team ID**: YOUR_TEAM_ID
 - **App Store Connect Key**: GA9T4G84AU
+- **App Store Connect Issuer**: 39f22957-9a03-421a-ada6-86471b32ee9f
 
 ### Required Secrets
 
-Configure these in each app repository:
+Configure these secrets in each app repository that uses the shared workflows.
 
 | Secret | Description |
 |--------|-------------|
 | `APP_STORE_CONNECT_KEY_ID` | App Store Connect API key ID |
 | `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect issuer ID |
-| `APP_STORE_CONNECT_PRIVATE_KEY` | App Store Connect private key |
-| `DISTRIBUTION_CERTIFICATE_BASE64` | Code signing certificate (base64) |
-| `DISTRIBUTION_CERTIFICATE_PASSWORD` | Certificate password |
-| `KEYCHAIN_PASSWORD` | Temporary keychain password |
-| `ANTHROPIC_API_KEY` | For AI content generation |
+| `APP_STORE_CONNECT_PRIVATE_KEY` | App Store Connect private key (`.p8` file contents) |
+| `DISTRIBUTION_CERTIFICATE_BASE64` | Code signing certificate (base64-encoded `.p12` file) |
+| `DISTRIBUTION_CERTIFICATE_PASSWORD` | Password for the `.p12` certificate |
+| `KEYCHAIN_PASSWORD` | Temporary keychain password (any random string) |
+| `ANTHROPIC_API_KEY` | For AI content generation (optional) |
+
+### How to Set Up Secrets
+
+#### 1. App Store Connect API Key
+
+1. Go to [App Store Connect > Users and Access > Keys](https://appstoreconnect.apple.com/access/api)
+2. Create a new key with "App Manager" role
+3. Download the `.p8` file (you can only download it once!)
+4. Note the Key ID and Issuer ID
+
+```bash
+# Set secrets using GitHub CLI
+gh secret set APP_STORE_CONNECT_KEY_ID --body "GA9T4G84AU" --repo OWNER/REPO
+gh secret set APP_STORE_CONNECT_ISSUER_ID --body "39f22957-9a03-421a-ada6-86471b32ee9f" --repo OWNER/REPO
+gh secret set APP_STORE_CONNECT_PRIVATE_KEY < ~/.private_keys/AuthKey_GA9T4G84AU.p8 --repo OWNER/REPO
+```
+
+#### 2. Distribution Certificate
+
+1. Export your Apple Distribution certificate from Keychain Access as a `.p12` file
+2. Set a password when exporting
+3. Base64 encode it:
+
+```bash
+# Encode the certificate
+base64 -i Certificates.p12 | pbcopy
+
+# Set the secrets
+gh secret set DISTRIBUTION_CERTIFICATE_BASE64 --body "$(base64 -i Certificates.p12)" --repo OWNER/REPO
+gh secret set DISTRIBUTION_CERTIFICATE_PASSWORD --body "your-p12-password" --repo OWNER/REPO
+```
+
+#### 3. Keychain Password
+
+This is just a temporary password used to create a keychain during CI. Use any random string:
+
+```bash
+gh secret set KEYCHAIN_PASSWORD --body "$(openssl rand -base64 32)" --repo OWNER/REPO
+```
+
+#### 4. Anthropic API Key (Optional)
+
+For AI-generated release notes and descriptions:
+
+```bash
+gh secret set ANTHROPIC_API_KEY --body "sk-ant-..." --repo OWNER/REPO
+```
+
+### Copy Secrets Between Repos
+
+If you have secrets configured in one repo, you can copy them to another:
+
+```bash
+# List secrets from source repo
+gh secret list --repo wdvr/footprint
+
+# Copy each secret (requires reading the value from a secure location)
+# Note: You cannot read secret values from GitHub, only set them
+```
+
+For our repos, the secrets are already configured in `wdvr/footprint`. Contact Wouter for access.
+
+### Current Secret Status
+
+| Repo | Secrets Configured |
+|------|-------------------|
+| BalloonInc/trivit-ios | Yes |
+| wdvr/snow | Yes |
+| wdvr/footprint | Yes |
 
 ## License
 
