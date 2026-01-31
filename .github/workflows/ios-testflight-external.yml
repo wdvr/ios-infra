@@ -32,10 +32,6 @@ on:
       APP_STORE_CONNECT_PRIVATE_KEY:
         required: false
 
-permissions:
-  actions: read
-  contents: write
-
 jobs:
   submit-external:
     name: Submit for External Beta Review
