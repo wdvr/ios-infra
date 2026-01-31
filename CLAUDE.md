@@ -10,11 +10,7 @@ Consolidate shared infrastructure across three iOS apps (trivit, snow/Powder Cha
 
 ## Apps
 
-| App | Repo | Bundle ID | Purpose |
-|-----|------|-----------|---------|
-| Trivit | trivit-ios | com.wouterdevriendt.trivit | Tally counter |
-| Powder Chaser | snow | com.wouterdevriendt.snowtracker | Ski resort tracker |
-| Footprint | footprint | com.wouterdevriendt.footprint | Travel tracker |
+This infrastructure supports multiple iOS apps. Each app has its own repository and uses the shared workflows from this repo.
 
 ## Shared Infrastructure
 
@@ -40,8 +36,8 @@ Consolidate shared infrastructure across three iOS apps (trivit, snow/Powder Cha
 ## Configuration
 
 All apps share:
-- Team ID: YOUR_TEAM_ID
-- App Store Connect Key: GA9T4G84AU
+- Same Apple Developer Team
+- Same App Store Connect API key
 - Self-hosted macOS ARM64 runners (with GitHub-hosted fallback)
 
 ## Usage
@@ -52,9 +48,9 @@ All apps share:
 2. Add `GoogleService-Info.plist` for Firebase
 3. Create workflow that calls reusable workflows:
    ```yaml
-   uses: wdvr/ios-infra/.github/workflows/ios-build.yml@main
+   uses: YOUR_ORG/ios-infra/.github/workflows/ios-build.yml@main
    with:
-     bundle_id: com.wouterdevriendt.newapp
+     bundle_id: com.yourcompany.newapp
      scheme: NewApp
    ```
 4. Add app-specific fastlane metadata
@@ -97,13 +93,13 @@ ios-infra/
 ## Secrets Required
 
 Each app repo needs these secrets configured:
-- `APP_STORE_CONNECT_KEY_ID` - API key ID (GA9T4G84AU)
+- `APP_STORE_CONNECT_KEY_ID` - API key ID
 - `APP_STORE_CONNECT_ISSUER_ID` - Issuer ID
-- `APP_STORE_CONNECT_PRIVATE_KEY` - Private key content
-- `DISTRIBUTION_CERTIFICATE_BASE64` - Code signing certificate
+- `APP_STORE_CONNECT_PRIVATE_KEY` - Private key content (.p8 file)
+- `DISTRIBUTION_CERTIFICATE_BASE64` - Code signing certificate (base64-encoded .p12)
 - `DISTRIBUTION_CERTIFICATE_PASSWORD` - Certificate password
 - `KEYCHAIN_PASSWORD` - Temporary keychain password
-- `ANTHROPIC_API_KEY` - For AI-generated content
+- `ANTHROPIC_API_KEY` - For AI-generated content (optional)
 
 ## Workflow Inputs
 
@@ -146,6 +142,4 @@ Each app repo needs these secrets configured:
 - [x] Reusable workflows extracted
 - [x] Scripts parameterized
 - [x] Swift Package created
-- [ ] trivit-ios migrated
-- [ ] snow migrated
-- [ ] footprint migrated
+- [x] All apps migrated to shared infrastructure
