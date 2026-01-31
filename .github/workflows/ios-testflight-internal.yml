@@ -29,11 +29,11 @@ on:
         value: ${{ jobs.upload-to-testflight.outputs.version }}
     secrets:
       APP_STORE_CONNECT_KEY_ID:
-        required: true
+        required: false
       APP_STORE_CONNECT_ISSUER_ID:
-        required: true
+        required: false
       APP_STORE_CONNECT_PRIVATE_KEY:
-        required: true
+        required: false
 
 jobs:
   upload-to-testflight:

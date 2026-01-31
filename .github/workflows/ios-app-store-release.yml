@@ -69,11 +69,11 @@ on:
         default: '.'
     secrets:
       APP_STORE_CONNECT_KEY_ID:
-        required: true
+        required: false
       APP_STORE_CONNECT_ISSUER_ID:
-        required: true
+        required: false
       APP_STORE_CONNECT_PRIVATE_KEY:
-        required: true
+        required: false
       ANTHROPIC_API_KEY:
         required: false
 

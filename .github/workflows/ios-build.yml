@@ -71,17 +71,17 @@ on:
         value: ${{ jobs.build.outputs.artifact_name }}
     secrets:
       APP_STORE_CONNECT_KEY_ID:
-        required: true
+        required: false
       APP_STORE_CONNECT_ISSUER_ID:
-        required: true
+        required: false
       APP_STORE_CONNECT_PRIVATE_KEY:
-        required: true
+        required: false
       DISTRIBUTION_CERTIFICATE_BASE64:
-        required: true
+        required: false
       DISTRIBUTION_CERTIFICATE_PASSWORD:
-        required: true
+        required: false
       KEYCHAIN_PASSWORD:
-        required: true
+        required: false
 
 env:
   TEAM_ID: 'YOUR_TEAM_ID'
