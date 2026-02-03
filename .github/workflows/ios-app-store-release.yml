@@ -67,6 +67,11 @@ on:
         required: false
         type: string
         default: '.'
+      team_id:
+        description: 'Apple Developer Team ID (default: YOUR_TEAM_ID)'
+        required: false
+        type: string
+        default: 'YOUR_TEAM_ID'
     secrets:
       APP_STORE_CONNECT_KEY_ID:
         required: false
@@ -78,7 +83,7 @@ on:
         required: false
 
 env:
-  TEAM_ID: 'YOUR_TEAM_ID'
+  TEAM_ID: ${{ inputs.team_id }}
 
 jobs:
   # Job 1: Generate AI assets (runs on Ubuntu)

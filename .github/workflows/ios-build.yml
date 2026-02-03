@@ -59,6 +59,11 @@ on:
         required: false
         type: string
         default: ''
+      team_id:
+        description: 'Apple Developer Team ID (default: YOUR_TEAM_ID)'
+        required: false
+        type: string
+        default: 'YOUR_TEAM_ID'
     outputs:
       build_number:
         description: 'The build number used'
@@ -84,7 +89,7 @@ on:
         required: false
 
 env:
-  TEAM_ID: 'YOUR_TEAM_ID'
+  TEAM_ID: ${{ inputs.team_id }}
 
 jobs:
   # Check runner availability (only if using self-hosted strategy)
