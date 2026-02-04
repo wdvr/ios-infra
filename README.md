@@ -33,8 +33,7 @@ jobs:
     with:
       bundle_id: com.yourcompany.yourapp
       scheme: YourApp
-      team_id: YOUR_TEAM_ID
-    secrets: inherit
+    secrets: inherit  # Requires APPLE_TEAM_ID secret
 ```
 
 ### Available Workflows
@@ -81,6 +80,7 @@ Configure these secrets in each app repository that uses the shared workflows.
 
 | Secret | Description |
 |--------|-------------|
+| `APPLE_TEAM_ID` | Apple Developer Team ID (10-character alphanumeric) |
 | `APP_STORE_CONNECT_KEY_ID` | App Store Connect API key ID |
 | `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect issuer ID |
 | `APP_STORE_CONNECT_PRIVATE_KEY` | App Store Connect private key (`.p8` file contents) |
