@@ -65,10 +65,10 @@ on:
         type: string
         default: 'YOUR_TEAM_ID'
       skip_automatic_signing:
-        description: 'Skip -allowProvisioningUpdates to prevent automatic certificate creation. Use when you have a valid certificate in secrets and want to avoid hitting Apple certificate limits.'
+        description: 'Skip -allowProvisioningUpdates to prevent automatic certificate creation. Defaults to true when DISTRIBUTION_CERTIFICATE_BASE64 is provided.'
         required: false
         type: boolean
-        default: false
+        default: true
       code_signing_identity:
         description: 'Code signing identity name (e.g., "Apple Distribution: Your Name (TEAMID)"). If provided, uses manual signing with this identity.'
         required: false
