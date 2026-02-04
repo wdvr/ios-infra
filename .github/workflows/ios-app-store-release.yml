@@ -276,12 +276,12 @@ jobs:
           fastlane/metadata/
         retention-days: 7
 
-  # Job 2: Screenshots and upload (runs on macOS)
+  # Job 2: Screenshots and upload (runs on self-hosted macOS)
   screenshots-and-upload:
     name: Screenshots & Upload
     needs: generate-assets
     if: ${{ always() && !cancelled() }}
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 60
 
     steps:
