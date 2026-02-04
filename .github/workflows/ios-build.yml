@@ -64,6 +64,16 @@ on:
         required: false
         type: string
         default: 'YOUR_TEAM_ID'
+      skip_automatic_signing:
+        description: 'Skip -allowProvisioningUpdates to prevent automatic certificate creation. Use when you have a valid certificate in secrets and want to avoid hitting Apple certificate limits.'
+        required: false
+        type: boolean
+        default: false
+      code_signing_identity:
+        description: 'Code signing identity name (e.g., "Apple Distribution: Your Name (TEAMID)"). If provided, uses manual signing with this identity.'
+        required: false
+        type: string
+        default: ''
     outputs:
       build_number:
         description: 'The build number used'
@@ -304,10 +314,23 @@ jobs:
         security import "$CERTIFICATE_PATH" -P "$DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
 
         echo "Setting key partition list..."
-        security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
         echo "Configuring keychain search list..."
+        # Put our keychain first in the search list so Xcode finds it
         security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+        security default-keychain -s "$KEYCHAIN_PATH"
+
+        echo "Verifying certificate installation..."
+        # List identities to verify the certificate is available for signing
+        IDENTITIES=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null || true)
+        echo "$IDENTITIES"
+
+        if echo "$IDENTITIES" | grep -q "Apple Distribution\|iPhone Distribution"; then
+          echo "Distribution certificate found and ready for signing"
+        else
+          echo "::warning::No distribution certificate found in keychain. Xcode may create a new one."
+        fi
 
         echo "Certificate installation complete"
 
@@ -324,22 +347,53 @@ jobs:
     - name: Archive app
       if: github.event_name != 'pull_request'
       run: |
-        xcodebuild archive \
-          ${{ steps.detect.outputs.build_flag }} "${{ steps.detect.outputs.build_path }}" \
-          -scheme "${{ inputs.scheme }}" \
+        # Build xcodebuild command
+        XCODE_CMD="xcodebuild archive \
+          ${{ steps.detect.outputs.build_flag }} \"${{ steps.detect.outputs.build_path }}\" \
+          -scheme \"${{ inputs.scheme }}\" \
           -configuration Release \
           -archivePath $RUNNER_TEMP/Export/App.xcarchive \
-          -destination 'generic/platform=iOS' \
-          -allowProvisioningUpdates \
+          -destination 'generic/platform=iOS'"
+
+        # Add provisioning updates unless skipped (to prevent automatic certificate creation)
+        if [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
+          XCODE_CMD="$XCODE_CMD -allowProvisioningUpdates"
+        fi
+
+        # Add authentication for App Store Connect API
+        XCODE_CMD="$XCODE_CMD \
           -authenticationKeyPath $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8 \
           -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
-          -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }} \
-          CODE_SIGN_STYLE=Automatic \
-          DEVELOPMENT_TEAM=${{ env.TEAM_ID }}
+          -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}"
+
+        # Use manual signing with specific identity if provided, otherwise automatic
+        if [ -n "${{ inputs.code_signing_identity }}" ]; then
+          echo "Using manual signing with identity: ${{ inputs.code_signing_identity }}"
+          XCODE_CMD="$XCODE_CMD \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=\"${{ inputs.code_signing_identity }}\" \
+            DEVELOPMENT_TEAM=${{ env.TEAM_ID }}"
+        else
+          XCODE_CMD="$XCODE_CMD \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM=${{ env.TEAM_ID }}"
+        fi
+
+        echo "Running: $XCODE_CMD"
+        eval $XCODE_CMD
 
     - name: Create ExportOptions.plist
       if: github.event_name != 'pull_request'
       run: |
+        # Determine signing style based on whether code_signing_identity is provided
+        if [ -n "${{ inputs.code_signing_identity }}" ]; then
+          SIGNING_STYLE="manual"
+          SIGNING_CERT="${{ inputs.code_signing_identity }}"
+        else
+          SIGNING_STYLE="automatic"
+          SIGNING_CERT=""
+        fi
+
         cat > /tmp/ExportOptions.plist << EOF
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -350,26 +404,50 @@ jobs:
             <key>teamID</key>
             <string>${{ env.TEAM_ID }}</string>
             <key>signingStyle</key>
-            <string>automatic</string>
+            <string>${SIGNING_STYLE}</string>
             <key>uploadSymbols</key>
             <true/>
             <key>destination</key>
             <string>export</string>
+        EOF
+
+        # Add signing certificate for manual signing
+        if [ -n "$SIGNING_CERT" ]; then
+          cat >> /tmp/ExportOptions.plist << EOF
+            <key>signingCertificate</key>
+            <string>${SIGNING_CERT}</string>
+        EOF
+        fi
+
+        cat >> /tmp/ExportOptions.plist << EOF
         </dict>
         </plist>
         EOF
 
+        echo "ExportOptions.plist:"
+        cat /tmp/ExportOptions.plist
+
     - name: Export IPA
       if: github.event_name != 'pull_request'
       run: |
-        xcodebuild -exportArchive \
+        # Build export command
+        EXPORT_CMD="xcodebuild -exportArchive \
           -archivePath $RUNNER_TEMP/Export/App.xcarchive \
           -exportPath $RUNNER_TEMP/Export \
-          -exportOptionsPlist /tmp/ExportOptions.plist \
-          -allowProvisioningUpdates \
+          -exportOptionsPlist /tmp/ExportOptions.plist"
+
+        # Add provisioning updates unless skipped
+        if [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
+          EXPORT_CMD="$EXPORT_CMD -allowProvisioningUpdates"
+        fi
+
+        EXPORT_CMD="$EXPORT_CMD \
           -authenticationKeyPath $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8 \
           -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
-          -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}"
+
+        echo "Running: $EXPORT_CMD"
+        eval $EXPORT_CMD
 
     - name: Upload IPA artifact
       id: artifact
