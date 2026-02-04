@@ -59,10 +59,6 @@ on:
         required: false
         type: string
         default: ''
-      team_id:
-        description: 'Apple Developer Team ID'
-        required: true
-        type: string
       skip_automatic_signing:
         description: 'Skip -allowProvisioningUpdates to prevent automatic certificate creation. Defaults to true when DISTRIBUTION_CERTIFICATE_BASE64 is provided.'
         required: false
@@ -96,9 +92,11 @@ on:
         required: false
       KEYCHAIN_PASSWORD:
         required: false
+      APPLE_TEAM_ID:
+        required: true
 
 env:
-  TEAM_ID: ${{ inputs.team_id }}
+  TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
 jobs:
   # Check runner availability (only if using self-hosted strategy)
