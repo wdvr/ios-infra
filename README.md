@@ -150,4 +150,4 @@ gh secret list --repo OWNER/SOURCE_REPO
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+PolyForm Noncommercial 1.0.0 - Free to use, but not for commercial sale. See [LICENSE](LICENSE).
