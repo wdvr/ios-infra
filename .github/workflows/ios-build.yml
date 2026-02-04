@@ -60,10 +60,9 @@ on:
         type: string
         default: ''
       team_id:
-        description: 'Apple Developer Team ID (default: YOUR_TEAM_ID)'
-        required: false
+        description: 'Apple Developer Team ID'
+        required: true
         type: string
-        default: 'YOUR_TEAM_ID'
       skip_automatic_signing:
         description: 'Skip -allowProvisioningUpdates to prevent automatic certificate creation. Defaults to true when DISTRIBUTION_CERTIFICATE_BASE64 is provided.'
         required: false

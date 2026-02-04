@@ -29,10 +29,11 @@ on:
 
 jobs:
   build:
-    uses: wdvr/ios-infra/.github/workflows/ios-build.yml@main
+    uses: YOUR_ORG/ios-infra/.github/workflows/ios-build.yml@main
     with:
       bundle_id: com.yourcompany.yourapp
       scheme: YourApp
+      team_id: YOUR_TEAM_ID
     secrets: inherit
 ```
 
@@ -49,7 +50,7 @@ jobs:
 
 ```bash
 # Clone as submodule
-git submodule add https://github.com/wdvr/ios-infra.git infra
+git submodule add https://github.com/YOUR_ORG/ios-infra.git infra
 
 # Generate release notes
 python infra/scripts/generate_release_notes.py --app yourapp --app-name "Your App"
@@ -64,7 +65,7 @@ In your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/wdvr/ios-infra.git", from: "1.0.0")
+    .package(url: "https://github.com/YOUR_ORG/ios-infra.git", from: "1.0.0")
 ]
 ```
 
@@ -149,4 +150,4 @@ gh secret list --repo OWNER/SOURCE_REPO
 
 ## License
 
-Private repository - All rights reserved.
+MIT License - See [LICENSE](LICENSE) for details.

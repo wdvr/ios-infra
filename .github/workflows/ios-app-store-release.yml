@@ -68,10 +68,9 @@ on:
         type: string
         default: '.'
       team_id:
-        description: 'Apple Developer Team ID (default: YOUR_TEAM_ID)'
-        required: false
+        description: 'Apple Developer Team ID'
+        required: true
         type: string
-        default: 'YOUR_TEAM_ID'
     secrets:
       APP_STORE_CONNECT_KEY_ID:
         required: false
