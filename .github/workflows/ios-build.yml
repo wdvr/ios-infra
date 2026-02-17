@@ -337,49 +337,64 @@ jobs:
         API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       run: |
-        # Generate JWT for App Store Connect API
-        HEADER=$(printf '{"alg":"ES256","kid":"%s","typ":"JWT"}' "$API_KEY_ID" | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
-        NOW=$(date +%s)
-        EXP=$((NOW + 1200))
-        PAYLOAD=$(printf '{"iss":"%s","exp":%d,"aud":"appstoreconnect-v1"}' "$API_ISSUER_ID" "$EXP" | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
-        SIGN_INPUT="${HEADER}.${PAYLOAD}"
-        SIGNATURE=$(printf '%s' "$SIGN_INPUT" | openssl dgst -sha256 -sign $RUNNER_TEMP/private_keys/AuthKey_${API_KEY_ID}.p8 | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
-        JWT="${SIGN_INPUT}.${SIGNATURE}"
+        pip3 install -q PyJWT 2>/dev/null || pip install -q PyJWT 2>/dev/null || true
+        python3 << 'PYEOF'
+        import json, time, subprocess, os, sys
+        try:
+            import jwt
+        except ImportError:
+            print("PyJWT not available, skipping certificate cleanup")
+            sys.exit(0)
 
-        # List iOS development certificates
-        echo "Checking development certificate count..."
-        RESPONSE=$(curl -s -H "Authorization: Bearer $JWT" \
-          "https://api.appstoreconnect.apple.com/v1/certificates?filter[certificateType]=IOS_DEVELOPMENT&limit=10")
+        key_id = os.environ["API_KEY_ID"]
+        issuer_id = os.environ["API_ISSUER_ID"]
+        key_path = os.path.join(os.environ["RUNNER_TEMP"], "private_keys", f"AuthKey_{key_id}.p8")
 
-        CERT_COUNT=$(echo "$RESPONSE" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('data',[])))" 2>/dev/null || echo "0")
-        echo "Found $CERT_COUNT iOS development certificates"
+        with open(key_path, "r") as f:
+            private_key = f.read()
 
-        if [ "$CERT_COUNT" -ge 2 ]; then
-          echo "At certificate limit, revoking oldest to make room..."
-          # Get the oldest certificate ID (last in the list, sorted by creation date)
-          OLDEST_CERT_ID=$(echo "$RESPONSE" | python3 -c "
-        import sys, json
-        data = json.load(sys.stdin).get('data', [])
-        if data:
-            # Sort by creation date, revoke the oldest
-            data.sort(key=lambda x: x.get('attributes', {}).get('expirationDate', ''))
-            print(data[0]['id'])
-        " 2>/dev/null || echo "")
+        now = int(time.time())
+        token = jwt.encode(
+            {"iss": issuer_id, "exp": now + 1200, "aud": "appstoreconnect-v1"},
+            private_key,
+            algorithm="ES256",
+            headers={"kid": key_id},
+        )
 
-          if [ -n "$OLDEST_CERT_ID" ]; then
-            echo "Revoking certificate: $OLDEST_CERT_ID"
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-              -H "Authorization: Bearer $JWT" \
-              "https://api.appstoreconnect.apple.com/v1/certificates/$OLDEST_CERT_ID")
-            if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
-              echo "Successfully revoked old development certificate"
-            else
-              echo "::warning::Failed to revoke certificate (HTTP $HTTP_CODE), continuing anyway..."
-            fi
-          fi
-        else
-          echo "Certificate count ($CERT_COUNT) is within limits, no cleanup needed"
-        fi
+        import urllib.request, urllib.error
+        headers = {"Authorization": f"Bearer {token}"}
+        url = "https://api.appstoreconnect.apple.com/v1/certificates?filter[certificateType]=IOS_DEVELOPMENT&limit=10"
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            print(f"::warning::Failed to list certificates: HTTP {e.code}")
+            sys.exit(0)
+
+        certs = data.get("data", [])
+        print(f"Found {len(certs)} iOS development certificates")
+
+        if len(certs) >= 2:
+            print("At certificate limit, revoking oldest to make room...")
+            certs.sort(key=lambda c: c.get("attributes", {}).get("expirationDate", ""))
+            oldest = certs[0]
+            cert_id = oldest["id"]
+            cert_name = oldest.get("attributes", {}).get("name", "unknown")
+            print(f"Revoking certificate: {cert_id} ({cert_name})")
+            del_req = urllib.request.Request(
+                f"https://api.appstoreconnect.apple.com/v1/certificates/{cert_id}",
+                headers=headers,
+                method="DELETE",
+            )
+            try:
+                urllib.request.urlopen(del_req)
+                print("Successfully revoked old development certificate")
+            except urllib.error.HTTPError as e:
+                print(f"::warning::Failed to revoke certificate (HTTP {e.code}), continuing...")
+        else:
+            print(f"Certificate count ({len(certs)}) is within limits, no cleanup needed")
+        PYEOF
 
     - name: Build (PR - no signing)
       if: github.event_name == 'pull_request'
