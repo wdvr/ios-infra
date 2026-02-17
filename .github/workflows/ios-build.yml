@@ -352,8 +352,10 @@ jobs:
           -archivePath $RUNNER_TEMP/Export/App.xcarchive \
           -destination 'generic/platform=iOS'"
 
-        # Add provisioning updates unless skipped (to prevent automatic certificate creation)
-        if [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
+        # Add provisioning updates:
+        # - Always needed for manual signing (to download provisioning profiles)
+        # - For automatic signing, controlled by skip_automatic_signing flag
+        if [ -n "${{ inputs.code_signing_identity }}" ] || [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
           XCODE_CMD="$XCODE_CMD -allowProvisioningUpdates"
         fi
 
@@ -433,8 +435,8 @@ jobs:
           -exportPath $RUNNER_TEMP/Export \
           -exportOptionsPlist /tmp/ExportOptions.plist"
 
-        # Add provisioning updates unless skipped
-        if [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
+        # Add provisioning updates (same logic as archive step)
+        if [ -n "${{ inputs.code_signing_identity }}" ] || [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
           EXPORT_CMD="$EXPORT_CMD -allowProvisioningUpdates"
         fi
 
