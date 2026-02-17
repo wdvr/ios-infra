@@ -331,6 +331,56 @@ jobs:
 
         echo "Certificate installation complete"
 
+    - name: Cleanup old development certificates
+      if: github.event_name != 'pull_request' && inputs.skip_automatic_signing == false
+      env:
+        API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      run: |
+        # Generate JWT for App Store Connect API
+        HEADER=$(printf '{"alg":"ES256","kid":"%s","typ":"JWT"}' "$API_KEY_ID" | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+        NOW=$(date +%s)
+        EXP=$((NOW + 1200))
+        PAYLOAD=$(printf '{"iss":"%s","exp":%d,"aud":"appstoreconnect-v1"}' "$API_ISSUER_ID" "$EXP" | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+        SIGN_INPUT="${HEADER}.${PAYLOAD}"
+        SIGNATURE=$(printf '%s' "$SIGN_INPUT" | openssl dgst -sha256 -sign $RUNNER_TEMP/private_keys/AuthKey_${API_KEY_ID}.p8 | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+        JWT="${SIGN_INPUT}.${SIGNATURE}"
+
+        # List iOS development certificates
+        echo "Checking development certificate count..."
+        RESPONSE=$(curl -s -H "Authorization: Bearer $JWT" \
+          "https://api.appstoreconnect.apple.com/v1/certificates?filter[certificateType]=IOS_DEVELOPMENT&limit=10")
+
+        CERT_COUNT=$(echo "$RESPONSE" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('data',[])))" 2>/dev/null || echo "0")
+        echo "Found $CERT_COUNT iOS development certificates"
+
+        if [ "$CERT_COUNT" -ge 2 ]; then
+          echo "At certificate limit, revoking oldest to make room..."
+          # Get the oldest certificate ID (last in the list, sorted by creation date)
+          OLDEST_CERT_ID=$(echo "$RESPONSE" | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin).get('data', [])
+        if data:
+            # Sort by creation date, revoke the oldest
+            data.sort(key=lambda x: x.get('attributes', {}).get('expirationDate', ''))
+            print(data[0]['id'])
+        " 2>/dev/null || echo "")
+
+          if [ -n "$OLDEST_CERT_ID" ]; then
+            echo "Revoking certificate: $OLDEST_CERT_ID"
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+              -H "Authorization: Bearer $JWT" \
+              "https://api.appstoreconnect.apple.com/v1/certificates/$OLDEST_CERT_ID")
+            if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+              echo "Successfully revoked old development certificate"
+            else
+              echo "::warning::Failed to revoke certificate (HTTP $HTTP_CODE), continuing anyway..."
+            fi
+          fi
+        else
+          echo "Certificate count ($CERT_COUNT) is within limits, no cleanup needed"
+        fi
+
     - name: Build (PR - no signing)
       if: github.event_name == 'pull_request'
       run: |
@@ -352,10 +402,8 @@ jobs:
           -archivePath $RUNNER_TEMP/Export/App.xcarchive \
           -destination 'generic/platform=iOS'"
 
-        # Add provisioning updates:
-        # - Always needed for manual signing (to download provisioning profiles)
-        # - For automatic signing, controlled by skip_automatic_signing flag
-        if [ -n "${{ inputs.code_signing_identity }}" ] || [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
+        # Add provisioning updates unless skipped (to prevent automatic certificate creation)
+        if [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
           XCODE_CMD="$XCODE_CMD -allowProvisioningUpdates"
         fi
 
@@ -365,11 +413,11 @@ jobs:
           -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
           -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}"
 
-        # Use specified identity with automatic signing, or fully automatic
+        # Use manual signing with specific identity if provided, otherwise automatic
         if [ -n "${{ inputs.code_signing_identity }}" ]; then
-          echo "Using automatic signing with identity: ${{ inputs.code_signing_identity }}"
+          echo "Using manual signing with identity: ${{ inputs.code_signing_identity }}"
           XCODE_CMD="$XCODE_CMD \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=\"${{ inputs.code_signing_identity }}\" \
             DEVELOPMENT_TEAM=${{ env.TEAM_ID }}"
         else
@@ -435,8 +483,8 @@ jobs:
           -exportPath $RUNNER_TEMP/Export \
           -exportOptionsPlist /tmp/ExportOptions.plist"
 
-        # Add provisioning updates (same logic as archive step)
-        if [ -n "${{ inputs.code_signing_identity }}" ] || [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
+        # Add provisioning updates unless skipped
+        if [ "${{ inputs.skip_automatic_signing }}" != "true" ]; then
           EXPORT_CMD="$EXPORT_CMD -allowProvisioningUpdates"
         fi
 
