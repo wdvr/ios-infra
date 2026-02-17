@@ -365,11 +365,11 @@ jobs:
           -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
           -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}"
 
-        # Use manual signing with specific identity if provided, otherwise automatic
+        # Use specified identity with automatic signing, or fully automatic
         if [ -n "${{ inputs.code_signing_identity }}" ]; then
-          echo "Using manual signing with identity: ${{ inputs.code_signing_identity }}"
+          echo "Using automatic signing with identity: ${{ inputs.code_signing_identity }}"
           XCODE_CMD="$XCODE_CMD \
-            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_STYLE=Automatic \
             CODE_SIGN_IDENTITY=\"${{ inputs.code_signing_identity }}\" \
             DEVELOPMENT_TEAM=${{ env.TEAM_ID }}"
         else
