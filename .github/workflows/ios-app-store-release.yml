@@ -153,34 +153,59 @@ jobs:
                     commits.append({"subject": parts[1], "date": parts[4]})
             return commits
 
-        last_tag = get_last_release_tag()
+        app_version = "${{ inputs.app_version }}"
+        # For patch releases (x.y.z where z>0), include all commits since the
+        # last minor version to capture the full feature set. Users upgrading
+        # from x.y-1 to x.y.z need to see ALL x.y features, not just the patch.
+        version_parts = app_version.split(".")
+        if len(version_parts) == 3 and int(version_parts[2]) > 0:
+            # Patch release: look for last minor version tag (e.g., v2.0.0 for v2.1.1)
+            minor_version = f"{version_parts[0]}.{int(version_parts[1]) - 1}"
+            try:
+                result = subprocess.run(
+                    ["git", "tag", "-l", f"v{minor_version}*", "--sort=-creatordate"],
+                    capture_output=True, text=True, check=True,
+                )
+                minor_tags = result.stdout.strip().split("\n")
+                last_tag = minor_tags[0] if minor_tags and minor_tags[0] else get_last_release_tag()
+            except (subprocess.CalledProcessError, IndexError):
+                last_tag = get_last_release_tag()
+        else:
+            last_tag = get_last_release_tag()
+
         commits = get_commits_since_tag(last_tag)
         commit_text = "\n".join([f"- {c['subject']} ({c['date']})" for c in commits[:50]])
 
         app_name = "${{ inputs.app_name }}"
         app_context = "${{ inputs.app_context }}" or "An iOS app"
+        # Use the minor version for the title (e.g., "2.1" not "2.1.1")
+        display_version = f"{version_parts[0]}.{version_parts[1]}" if len(version_parts) >= 2 else app_version
 
         client = anthropic.Anthropic()
-        prompt = f"""You are writing App Store release notes for {app_name} ({app_context}).
+        prompt = f"""You are writing App Store release notes for {app_name} v{display_version} ({app_context}).
 
-        Commits since last release:
+        Commits since last minor release:
         {commit_text}
 
         Write release notes that:
         1. Are user-friendly (avoid technical jargon)
         2. Focus on user-visible improvements
-        3. Are concise (under 500 characters for App Store limit)
-        4. Use bullet points for multiple changes
+        3. Are concise (under 4000 characters for App Store limit)
+        4. Group related changes under section headers (e.g., NEW FEATURES, IMPROVEMENTS)
         5. Start with most impactful changes
         6. Skip internal/technical changes users don't care about
+        7. Title as "What's New in {app_name} {display_version}"
+        8. For patch releases, include ALL features from the parent minor version
+        9. End with "We'd love your feedback - tap Settings > Send Feedback."
 
-        If there are no significant user-facing changes, write something like:
-        "Bug fixes and performance improvements."
+        IMPORTANT: This is version {app_version}. If this is a patch release (e.g., x.y.1),
+        include the full feature set from x.y, not just the patch fixes. Users upgrading from
+        the previous minor version need to see everything that's new.
 
         Output ONLY the release notes text, no additional commentary."""
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -230,7 +255,7 @@ jobs:
         Output ONLY the description text, no additional commentary."""
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}],
         )
