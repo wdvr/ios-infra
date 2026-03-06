@@ -48,7 +48,7 @@ on:
         description: 'Prefer self-hosted runners'
         required: false
         type: boolean
-        default: false
+        default: true
       enable_fallback:
         description: 'Fall back to GitHub-hosted if self-hosted unavailable'
         required: false

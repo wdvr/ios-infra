@@ -38,7 +38,7 @@ on:
 jobs:
   upload-to-testflight:
     name: Upload to TestFlight Internal
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, ARM64]
     outputs:
       build_number: ${{ steps.artifact.outputs.build }}
       version: ${{ steps.artifact.outputs.version }}
