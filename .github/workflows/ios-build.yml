@@ -75,10 +75,6 @@ on:
         required: false
       DISTRIBUTION_CERTIFICATE_PASSWORD:
         required: false
-      DEV_CERTIFICATE_BASE64:
-        required: false
-      DEV_CERTIFICATE_PASSWORD:
-        required: false
       APPLE_TEAM_ID:
         required: true
 
@@ -230,8 +226,6 @@ jobs:
       env:
         CERT_BASE64: ${{ secrets.DISTRIBUTION_CERTIFICATE_BASE64 }}
         CERT_PASSWORD: ${{ secrets.DISTRIBUTION_CERTIFICATE_PASSWORD }}
-        DEV_CERT_BASE64: ${{ secrets.DEV_CERTIFICATE_BASE64 }}
-        DEV_CERT_PASSWORD: ${{ secrets.DEV_CERTIFICATE_PASSWORD }}
       run: |
         KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
         KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
@@ -243,15 +237,6 @@ jobs:
           -P "$CERT_PASSWORD" \
           -A -t cert -f pkcs12 \
           -k "$KEYCHAIN_PATH"
-        # Import development certificate (shared across all runners)
-        if [ -n "$DEV_CERT_BASE64" ]; then
-          echo "$DEV_CERT_BASE64" | base64 --decode > $RUNNER_TEMP/dev_cert.p12
-          security import $RUNNER_TEMP/dev_cert.p12 \
-            -P "$DEV_CERT_PASSWORD" \
-            -A -t cert -f pkcs12 \
-            -k "$KEYCHAIN_PATH"
-          rm -f $RUNNER_TEMP/dev_cert.p12
-        fi
         security set-key-partition-list -S apple-tool:,apple:,codesign: \
           -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
         # Replace keychain search list with ONLY the signing keychain
@@ -259,7 +244,7 @@ jobs:
         security default-keychain -s "$KEYCHAIN_PATH"
         echo "SIGNING_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
         security find-identity -v -p codesigning | head -5
-        rm -f $RUNNER_TEMP/cert.p12 $RUNNER_TEMP/dev_cert.p12
+        rm -f $RUNNER_TEMP/cert.p12
 
     - name: Archive app
       if: github.event_name != 'pull_request'
@@ -293,6 +278,7 @@ jobs:
         else
           XCODE_CMD="$XCODE_CMD \
             CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY=\"Apple Distribution\" \
             DEVELOPMENT_TEAM=${{ env.TEAM_ID }}"
         fi
 
