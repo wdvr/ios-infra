@@ -38,15 +38,20 @@ on:
         type: boolean
         default: true
       generate_description:
-        description: 'Generate description with AI'
+        description: 'Generate a description draft with AI (only uploaded if upload_description is also true)'
         required: false
         type: boolean
-        default: true
+        default: false
       generate_release_notes:
         description: 'Generate release notes with AI'
         required: false
         type: boolean
-        default: true
+        default: false
+      upload_description:
+        description: 'Upload description.txt to App Store Connect (overwrites the live/pending description)'
+        required: false
+        type: boolean
+        default: false
       submit_for_review:
         description: 'Submit to App Store review'
         required: false
@@ -382,6 +387,14 @@ jobs:
         echo "${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}" > ~/.private_keys/AuthKey.p8
         chmod 600 ~/.private_keys/AuthKey.p8
 
+    - name: Keep App Store descriptions untouched
+      if: ${{ !inputs.upload_description }}
+      run: |
+        # deliver uploads every description.txt it finds. Remove them from this
+        # checkout so the description in App Store Connect is never overwritten
+        # unless upload_description is explicitly set.
+        find . -path '*fastlane/metadata/*/description.txt' -print -delete
+
     - name: Upload to App Store Connect
       env:
         APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
@@ -397,14 +410,16 @@ jobs:
             --skip_binary_upload \
             --skip_screenshots \
             --force \
-            --app_version ${{ inputs.app_version }} || echo "Deliver may need configuration"
+            --submit_for_review ${{ inputs.submit_for_review }} \
+            --app_version ${{ inputs.app_version }}
         else
           fastlane deliver \
             --app_identifier "${{ inputs.bundle_id }}" \
             --skip_binary_upload \
             --skip_screenshots \
             --force \
-            --app_version ${{ inputs.app_version }} || echo "Deliver may need configuration"
+            --submit_for_review ${{ inputs.submit_for_review }} \
+            --app_version ${{ inputs.app_version }}
         fi
 
     - name: Cleanup
@@ -415,7 +430,7 @@ jobs:
   tag-release:
     name: Tag Release Candidate
     needs: screenshots-and-upload
-    if: ${{ always() && !cancelled() }}
+    if: ${{ !cancelled() && needs.screenshots-and-upload.result == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -438,6 +453,7 @@ jobs:
         App Store metadata prepared:
         - Screenshots: ${{ inputs.generate_screenshots }}
         - AI Description: ${{ inputs.generate_description }}
+        - Upload description: ${{ inputs.upload_description }}
         - AI Release Notes: ${{ inputs.generate_release_notes }}
         - Submit for review: ${{ inputs.submit_for_review }}
 
@@ -458,7 +474,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Assets Prepared" >> $GITHUB_STEP_SUMMARY
         echo "- Screenshots: ${{ inputs.generate_screenshots && 'Generated' || 'Skipped' }}" >> $GITHUB_STEP_SUMMARY
-        echo "- Description: ${{ inputs.generate_description && 'AI Generated' || 'Skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Description: ${{ inputs.upload_description && (inputs.generate_description && 'AI Generated, uploaded' || 'Uploaded from repo') || 'Not uploaded (App Store Connect description left unchanged)' }}" >> $GITHUB_STEP_SUMMARY
         echo "- Release Notes: ${{ inputs.generate_release_notes && 'AI Generated' || 'Skipped' }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         if [ "${{ inputs.submit_for_review }}" = "true" ]; then
