@@ -41,15 +41,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0
 
     - name: Setup App Store Connect API Key
+      env:
+        ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       run: |
         mkdir -p ~/.private_keys
-        echo "${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}" > ~/.private_keys/AuthKey.p8
-        chmod 600 ~/.private_keys/AuthKey.p8
+        (umask 077; printf '%s\n' "$ASC_PRIVATE_KEY" > ~/.private_keys/AuthKey.p8)
 
     - name: Install dependencies
       run: pip3 install PyJWT cryptography

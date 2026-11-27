@@ -1,0 +1,57 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Install gitleaks
+      run: |
+        TARBALL="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        curl -sSfL -o "$RUNNER_TEMP/$TARBALL" \
+          "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${TARBALL}"
+        echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$TARBALL" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/$TARBALL" -C "$RUNNER_TEMP" gitleaks
+
+    - name: Scan full git history
+      run: |
+        "$RUNNER_TEMP/gitleaks" git . --redact --verbose --exit-code 1
+
+  pinned-actions:
+    name: Actions pinned to commit SHAs
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
+
+    - name: Check every remote action is pinned to a full commit SHA
+      run: |
+        UNPINNED=$(grep -rnE '^\s*(-\s+)?uses:' .github/workflows \
+          | grep -vE 'uses:\s*\./' \
+          | grep -vE 'uses:\s*docker://' \
+          | grep -vE 'uses:\s*[^@[:space:]]+@[0-9a-f]{40}(\s|$)' || true)
+        if [ -n "$UNPINNED" ]; then
+          echo "::error::Actions must be pinned to a full 40-character commit SHA:"
+          echo "$UNPINNED"
+          exit 1
+        fi
+        echo "All actions are pinned to commit SHAs."

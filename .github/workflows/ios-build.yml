@@ -90,7 +90,7 @@ jobs:
         echo "Host: $(hostname)"
 
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0
 
@@ -235,10 +235,12 @@ jobs:
 
     - name: Setup App Store Connect API Key
       if: github.event_name != 'pull_request'
+      env:
+        ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       run: |
-        mkdir -p $RUNNER_TEMP/private_keys
-        echo "${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}" | tr -d '\r' > $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
-        chmod 600 $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+        mkdir -p "$RUNNER_TEMP/private_keys"
+        (umask 077; printf '%s\n' "$ASC_PRIVATE_KEY" | tr -d '\r' > "$RUNNER_TEMP/private_keys/AuthKey_${ASC_KEY_ID}.p8")
 
     - name: Build (PR - no signing)
       if: github.event_name == 'pull_request'
@@ -277,7 +279,7 @@ jobs:
           sleep 5
         done
 
-        cleanup_lock() { rm -f "$LOCKFILE"; }
+        cleanup_lock() { rm -f "$LOCKFILE" "$RUNNER_TEMP/cert.p12"; }
         trap cleanup_lock EXIT
 
         # Setup persistent signing keychain (shared across all runners)
@@ -291,7 +293,7 @@ jobs:
         DIST_COUNT=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | grep "Apple Distribution" | wc -l | tr -d ' ')
         if [ "$DIST_COUNT" -eq "0" ]; then
           echo "Importing distribution certificate..."
-          echo "$CERT_BASE64" | base64 --decode > $RUNNER_TEMP/cert.p12
+          (umask 077; printf '%s' "$CERT_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12")
           security import $RUNNER_TEMP/cert.p12 \
             -P "$CERT_PASSWORD" \
             -A -t cert -f pkcs12 \
@@ -361,15 +363,18 @@ jobs:
           -archivePath $RUNNER_TEMP/Export/App.xcarchive \
           -destination 'generic/platform=iOS' \
           -allowProvisioningUpdates \
-          -authenticationKeyPath $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8 \
-          -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
-          -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }} \
+          -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${KEY_ID}.p8" \
+          -authenticationKeyID "$KEY_ID" \
+          -authenticationKeyIssuerID "$ISSUER_ID" \
           CODE_SIGN_STYLE=Automatic \
           DEVELOPMENT_TEAM=${{ env.TEAM_ID }} \
           CURRENT_PROJECT_VERSION=${{ steps.version.outputs.build }}
 
     - name: Export IPA
       if: github.event_name != 'pull_request'
+      env:
+        KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       run: |
         cat > /tmp/ExportOptions.plist << EOF
         <?xml version="1.0" encoding="UTF-8"?>
@@ -396,14 +401,14 @@ jobs:
           -exportPath $RUNNER_TEMP/Export \
           -exportOptionsPlist /tmp/ExportOptions.plist \
           -allowProvisioningUpdates \
-          -authenticationKeyPath $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8 \
-          -authenticationKeyID ${{ secrets.APP_STORE_CONNECT_KEY_ID }} \
-          -authenticationKeyIssuerID ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          -authenticationKeyPath "$RUNNER_TEMP/private_keys/AuthKey_${KEY_ID}.p8" \
+          -authenticationKeyID "$KEY_ID" \
+          -authenticationKeyIssuerID "$ISSUER_ID"
 
     - name: Upload IPA artifact
       id: artifact
       if: github.event_name != 'pull_request'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: ipa-${{ steps.version.outputs.version }}-${{ steps.version.outputs.build }}
         path: |
@@ -432,4 +437,4 @@ jobs:
     - name: Cleanup
       if: always()
       run: |
-        rm -rf $RUNNER_TEMP/private_keys $RUNNER_TEMP/Export
+        rm -rf "$RUNNER_TEMP/private_keys" "$RUNNER_TEMP/Export" "$RUNNER_TEMP/cert.p12"

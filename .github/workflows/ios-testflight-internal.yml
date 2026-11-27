@@ -45,7 +45,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0
 
@@ -97,14 +97,18 @@ jobs:
         echo "Downloaded version $VERSION build $BUILD"
 
     - name: Setup App Store Connect API Key
+      env:
+        ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       run: |
-        mkdir -p $RUNNER_TEMP/private_keys
-        echo "${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}" | tr -d '\r' > $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
-        chmod 600 $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
+        mkdir -p "$RUNNER_TEMP/private_keys"
+        (umask 077; printf '%s\n' "$ASC_PRIVATE_KEY" | tr -d '\r' > "$RUNNER_TEMP/private_keys/AuthKey_${ASC_KEY_ID}.p8")
 
     - name: Upload to App Store Connect
       env:
         API_PRIVATE_KEYS_DIR: ${{ runner.temp }}/private_keys
+        ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       run: |
         IPA_PATH=$(find $RUNNER_TEMP/Download -name "*.ipa" | head -1)
 
@@ -118,8 +122,8 @@ jobs:
         xcrun altool --upload-app \
           --type ios \
           --file "$IPA_PATH" \
-          --apiKey "${{ secrets.APP_STORE_CONNECT_KEY_ID }}" \
-          --apiIssuer "${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}"
+          --apiKey "$ASC_KEY_ID" \
+          --apiIssuer "$ASC_ISSUER_ID"
 
     - name: Install PyJWT
       run: pip3 install --break-system-packages PyJWT cryptography
