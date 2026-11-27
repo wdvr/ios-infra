@@ -98,8 +98,9 @@ Each app repo needs these secrets configured:
 - `APP_STORE_CONNECT_PRIVATE_KEY` - Private key content (.p8 file)
 - `DISTRIBUTION_CERTIFICATE_BASE64` - Code signing certificate (base64-encoded .p12)
 - `DISTRIBUTION_CERTIFICATE_PASSWORD` - Certificate password
-- `KEYCHAIN_PASSWORD` - Temporary keychain password
 - `ANTHROPIC_API_KEY` - For AI-generated content (optional)
+
+Self-hosted runners also need `IOS_SIGNING_KEYCHAIN_PASSWORD` in each runner's `.env` (shared signing keychain password; see README).
 
 ## Workflow Inputs
 

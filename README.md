@@ -127,7 +127,9 @@ The signing keychain (`~/ios-signing.keychain-db`) persists on each self-hosted 
 echo "IOS_SIGNING_KEYCHAIN_PASSWORD=$(openssl rand -base64 32)" >> ~/actions-runner/.env
 ```
 
-On the next build, a keychain still using the old default password is re-keyed to this value. Use the same value for all runners on one Mac.
+Then restart each runner service (`./svc.sh stop && ./svc.sh start` in the runner directory); the runner only reads `.env` at startup.
+
+On the next build, a keychain still using the old default password is re-keyed to this value, for every app on that Mac. Use the same value for all runners on one Mac, and only set it once every app built on that Mac calls a version of `ios-build.yml` that reads `IOS_SIGNING_KEYCHAIN_PASSWORD`; older versions only know the old default password and fail to sign after the re-key.
 
 #### 4. Anthropic API Key (Optional)
 
