@@ -61,6 +61,7 @@ jobs:
         APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         APP_BUNDLE_ID: ${{ inputs.bundle_id }}
+        WHATS_NEW: ${{ inputs.whats_new }}
       run: |
         JWT=$(python3 -c "
         import jwt, time, os
@@ -112,10 +113,16 @@ jobs:
         echo "build_number=$BUILD_VERSION" >> $GITHUB_OUTPUT
 
         # Add beta build localization
+        LOCALIZATION_BODY=$(BUILD_ID="$BUILD_ID" python3 -c "
+        import json, os
+        print(json.dumps({'data': {'type': 'betaBuildLocalizations',
+          'attributes': {'locale': 'en-US', 'whatsNew': os.environ['WHATS_NEW']},
+          'relationships': {'build': {'data': {'type': 'builds', 'id': os.environ['BUILD_ID']}}}}}))
+        ")
         curl -g -s -X POST \
           -H "Authorization: Bearer $JWT" \
           -H "Content-Type: application/json" \
-          -d "{\"data\":{\"type\":\"betaBuildLocalizations\",\"attributes\":{\"locale\":\"en-US\",\"whatsNew\":\"${{ inputs.whats_new }}\"},\"relationships\":{\"build\":{\"data\":{\"type\":\"builds\",\"id\":\"$BUILD_ID\"}}}}}" \
+          -d "$LOCALIZATION_BODY" \
           "https://api.appstoreconnect.apple.com/v1/betaBuildLocalizations" || true
 
         # Submit for beta review
@@ -133,6 +140,8 @@ jobs:
         fi
 
     - name: Create Git Tag
+      env:
+        WHATS_NEW: ${{ inputs.whats_new }}
       run: |
         BUILD="${{ steps.submit.outputs.build_number }}"
         TAG="testflight_build_$BUILD"
@@ -143,7 +152,7 @@ jobs:
         git tag -a "$TAG" -m "TestFlight external build $BUILD
 
         Submitted for external beta review.
-        What's new: ${{ inputs.whats_new }}
+        What's new: $WHATS_NEW
 
         Triggered by: ${{ github.actor }}"
 

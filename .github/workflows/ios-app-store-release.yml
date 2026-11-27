@@ -93,6 +93,8 @@ jobs:
     name: Generate Assets
     runs-on: ubuntu-latest
     if: ${{ inputs.generate_description || inputs.generate_release_notes }}
+    permissions:
+      contents: read
     outputs:
       description_generated: ${{ steps.generate.outputs.description }}
       release_notes_generated: ${{ steps.generate.outputs.release_notes }}
@@ -102,6 +104,7 @@ jobs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0
+        persist-credentials: false
 
     - name: Setup Python
       uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -115,6 +118,8 @@ jobs:
       if: ${{ inputs.generate_release_notes }}
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        APP_NAME: ${{ inputs.app_name }}
+        APP_CONTEXT: ${{ inputs.app_context }}
       run: |
         # Inline release notes generation
         python3 << 'SCRIPT'
@@ -181,8 +186,8 @@ jobs:
         commits = get_commits_since_tag(last_tag)
         commit_text = "\n".join([f"- {c['subject']} ({c['date']})" for c in commits[:50]])
 
-        app_name = "${{ inputs.app_name }}"
-        app_context = "${{ inputs.app_context }}" or "An iOS app"
+        app_name = os.environ["APP_NAME"]
+        app_context = os.environ.get("APP_CONTEXT") or "An iOS app"
         # Use the minor version for the title (e.g., "2.1" not "2.1.1")
         display_version = f"{version_parts[0]}.{version_parts[1]}" if len(version_parts) >= 2 else app_version
 
@@ -227,6 +232,8 @@ jobs:
       if: ${{ inputs.generate_description }}
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        APP_NAME: ${{ inputs.app_name }}
+        APP_CONTEXT: ${{ inputs.app_context }}
       run: |
         # Inline description generation
         python3 << 'SCRIPT'
@@ -241,8 +248,8 @@ jobs:
             subprocess.check_call(["pip", "install", "anthropic"])
             import anthropic
 
-        app_name = "${{ inputs.app_name }}"
-        app_context = "${{ inputs.app_context }}" or "An iOS app"
+        app_name = os.environ["APP_NAME"]
+        app_context = os.environ.get("APP_CONTEXT") or "An iOS app"
 
         client = anthropic.Anthropic()
         prompt = f"""You are writing an App Store description for {app_name}.
@@ -310,10 +317,14 @@ jobs:
     if: ${{ always() && !cancelled() }}
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 60
+    permissions:
+      contents: read
 
     steps:
     - name: Checkout code
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
 
     - name: Download generated assets
       if: ${{ needs.generate-assets.result == 'success' }}
@@ -465,9 +476,11 @@ jobs:
         echo "Created tag: $TAG"
 
     - name: Summary
+      env:
+        APP_NAME: ${{ inputs.app_name }}
       run: |
         echo "## App Store Release Preparation" >> $GITHUB_STEP_SUMMARY
-        echo "- **App**: ${{ inputs.app_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **App**: $APP_NAME" >> $GITHUB_STEP_SUMMARY
         echo "- **Bundle ID**: ${{ inputs.bundle_id }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Version**: ${{ inputs.app_version }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Build**: ${{ inputs.build_number }}" >> $GITHUB_STEP_SUMMARY

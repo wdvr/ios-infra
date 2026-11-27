@@ -76,6 +76,8 @@ jobs:
     name: Build & Archive
     runs-on: self-hosted
     timeout-minutes: 30
+    permissions:
+      contents: read
     outputs:
       build_number: ${{ steps.version.outputs.build }}
       version: ${{ steps.version.outputs.version }}
@@ -93,6 +95,7 @@ jobs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0
+        persist-credentials: false
 
     - name: Select Xcode
       run: |
@@ -262,7 +265,13 @@ jobs:
       run: |
         LOCKFILE="/tmp/ios-signing.lock"
         KEYCHAIN_PATH="$HOME/ios-signing.keychain-db"
-        KEYCHAIN_PASSWORD="ios-signing-shared"
+        LEGACY_KEYCHAIN_PASSWORD="ios-signing-shared"
+        if [ -n "${IOS_SIGNING_KEYCHAIN_PASSWORD:-}" ]; then
+          KEYCHAIN_PASSWORD="$IOS_SIGNING_KEYCHAIN_PASSWORD"
+        else
+          echo "::warning::IOS_SIGNING_KEYCHAIN_PASSWORD is not set in the runner environment; using the legacy public keychain password."
+          KEYCHAIN_PASSWORD="$LEGACY_KEYCHAIN_PASSWORD"
+        fi
 
         # Acquire lock (wait up to 10 minutes for other runners)
         echo "Waiting for signing lock..."
@@ -287,7 +296,17 @@ jobs:
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
         fi
-        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        if ! security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" 2>/dev/null; then
+          if [ "$KEYCHAIN_PASSWORD" != "$LEGACY_KEYCHAIN_PASSWORD" ] && \
+             security unlock-keychain -p "$LEGACY_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" 2>/dev/null; then
+            echo "Rotating signing keychain off the legacy password..."
+            security set-keychain-password -o "$LEGACY_KEYCHAIN_PASSWORD" -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          else
+            echo "::error::Cannot unlock $KEYCHAIN_PATH. Set IOS_SIGNING_KEYCHAIN_PASSWORD in this runner's .env to the password the keychain uses."
+            exit 1
+          fi
+        fi
 
         # Import distribution cert if not already present
         DIST_COUNT=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | grep "Apple Distribution" | wc -l | tr -d ' ')
@@ -395,7 +414,7 @@ jobs:
         </plist>
         EOF
 
-        security unlock-keychain -p "ios-signing-shared" "$HOME/ios-signing.keychain-db" 2>/dev/null || true
+        security unlock-keychain -p "${IOS_SIGNING_KEYCHAIN_PASSWORD:-ios-signing-shared}" "$HOME/ios-signing.keychain-db" 2>/dev/null || true
         xcodebuild -exportArchive \
           -archivePath $RUNNER_TEMP/Export/App.xcarchive \
           -exportPath $RUNNER_TEMP/Export \
