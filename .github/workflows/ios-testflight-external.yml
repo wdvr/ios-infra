@@ -53,7 +53,7 @@ jobs:
         (umask 077; printf '%s\n' "$ASC_PRIVATE_KEY" > ~/.private_keys/AuthKey.p8)
 
     - name: Install dependencies
-      run: pip3 install PyJWT cryptography
+      run: pip3 install PyJWT==2.15.1 cryptography==50.0.2
 
     - name: Submit for External Review & Tag
       id: submit

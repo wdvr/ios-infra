@@ -126,7 +126,7 @@ jobs:
           --apiIssuer "$ASC_ISSUER_ID"
 
     - name: Install PyJWT
-      run: pip3 install --break-system-packages PyJWT cryptography
+      run: pip3 install --break-system-packages PyJWT==2.15.1 cryptography==50.0.2
 
     - name: Wait for processing & distribute
       env:

@@ -112,7 +112,7 @@ jobs:
         python-version: '3.11'
 
     - name: Install dependencies
-      run: pip install anthropic
+      run: pip install anthropic==2.3.0
 
     - name: Generate release notes
       if: ${{ inputs.generate_release_notes }}
@@ -131,7 +131,7 @@ jobs:
         try:
             import anthropic
         except ImportError:
-            subprocess.check_call(["pip", "install", "anthropic"])
+            subprocess.check_call(["pip", "install", "anthropic==2.3.0"])
             import anthropic
 
         def get_last_release_tag():
@@ -245,7 +245,7 @@ jobs:
             import anthropic
         except ImportError:
             import subprocess
-            subprocess.check_call(["pip", "install", "anthropic"])
+            subprocess.check_call(["pip", "install", "anthropic==2.3.0"])
             import anthropic
 
         app_name = os.environ["APP_NAME"]
