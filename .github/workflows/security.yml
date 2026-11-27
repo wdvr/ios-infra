@@ -45,13 +45,42 @@ jobs:
 
     - name: Check every remote action is pinned to a full commit SHA
       run: |
-        UNPINNED=$(grep -rnE '^\s*(-\s+)?uses:' .github/workflows \
-          | grep -vE 'uses:\s*\./' \
-          | grep -vE 'uses:\s*docker://' \
-          | grep -vE 'uses:\s*[^@[:space:]]+@[0-9a-f]{40}(\s|$)' || true)
-        if [ -n "$UNPINNED" ]; then
-          echo "::error::Actions must be pinned to a full 40-character commit SHA:"
-          echo "$UNPINNED"
-          exit 1
-        fi
-        echo "All actions are pinned to commit SHAs."
+        python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet --break-system-packages PyYAML==6.0.2
+        python3 - <<'PY'
+        import glob, re, sys
+        import yaml
+
+        def uses_refs(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "uses" and isinstance(value, str):
+                        yield value
+                    else:
+                        yield from uses_refs(value)
+            elif isinstance(node, list):
+                for item in node:
+                    yield from uses_refs(item)
+
+        pinned = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
+        digest = re.compile(r"^docker://[^@\s]+@sha256:[0-9a-f]{64}$")
+        bad = []
+        files = glob.glob(".github/workflows/*.yml") + glob.glob(".github/workflows/*.yaml")
+        files += glob.glob("**/action.yml", recursive=True) + glob.glob("**/action.yaml", recursive=True)
+        for path in sorted(set(files)):
+            with open(path) as f:
+                doc = yaml.safe_load(f)
+            for ref in uses_refs(doc):
+                ref = ref.strip()
+                if ref.startswith("./"):
+                    continue
+                if ref.startswith("docker://") and digest.match(ref):
+                    continue
+                if not ref.startswith("docker://") and pinned.match(ref):
+                    continue
+                bad.append(f"{path}: {ref}")
+        if bad:
+            print("::error::Actions must be pinned to a full 40-character commit SHA (docker:// images to a sha256 digest):")
+            print("\n".join(bad))
+            sys.exit(1)
+        print("All actions are pinned.")
+        PY
