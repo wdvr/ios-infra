@@ -1,0 +1,90 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Install gitleaks
+      run: |
+        TARBALL="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        curl -sSfL -o "$RUNNER_TEMP/$TARBALL" \
+          "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${TARBALL}"
+        echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$TARBALL" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/$TARBALL" -C "$RUNNER_TEMP" gitleaks
+
+    - name: Scan full git history
+      run: |
+        "$RUNNER_TEMP/gitleaks" git . --redact --verbose --exit-code 1
+
+  pinned-actions:
+    name: Actions pinned to commit SHAs
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
+
+    - name: Check every remote action is pinned to a full commit SHA
+      run: |
+        # Run Python outside the checkout so a PR cannot shadow PyYAML with its own yaml.py.
+        cd "$RUNNER_TEMP"
+        python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet --break-system-packages PyYAML==6.0.2
+        python3 - <<'PY'
+        import glob, os, re, sys
+        import yaml
+
+        os.chdir(os.environ["GITHUB_WORKSPACE"])
+
+        def uses_refs(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "uses" and isinstance(value, str):
+                        yield value
+                    else:
+                        yield from uses_refs(value)
+            elif isinstance(node, list):
+                for item in node:
+                    yield from uses_refs(item)
+
+        pinned = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
+        digest = re.compile(r"^docker://[^@\s]+@sha256:[0-9a-f]{64}$")
+        bad = []
+        files = glob.glob(".github/workflows/*.yml") + glob.glob(".github/workflows/*.yaml")
+        files += glob.glob("**/action.yml", recursive=True) + glob.glob("**/action.yaml", recursive=True)
+        for path in sorted(set(files)):
+            with open(path) as f:
+                doc = yaml.safe_load(f)
+            for ref in uses_refs(doc):
+                ref = ref.strip()
+                if ref.startswith("./"):
+                    continue
+                if ref.startswith("docker://") and digest.match(ref):
+                    continue
+                if not ref.startswith("docker://") and pinned.match(ref):
+                    continue
+                bad.append(f"{path}: {ref}")
+        if bad:
+            print("::error::Actions must be pinned to a full 40-character commit SHA (docker:// images to a sha256 digest):")
+            print("\n".join(bad))
+            sys.exit(1)
+        print("All actions are pinned.")
+        PY

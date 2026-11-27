@@ -17,7 +17,7 @@ ASC_KEY_PATH="$HOME/.appstoreconnect/AuthKey_GA9T4G84AU.p8"
 ASC_KEY_ID="GA9T4G84AU"
 ASC_ISSUER_ID="39f22957-9a03-421a-ada6-86471b32ee9f"
 KEYCHAIN_PATH="$HOME/ios-signing.keychain-db"
-KEYCHAIN_PASSWORD="ios-signing-shared"
+KEYCHAIN_PASSWORD="${IOS_SIGNING_KEYCHAIN_PASSWORD:-ios-signing-shared}"
 
 # --- Resolve project ---
 PROJECT_DIR="${1:-$(pwd)}"

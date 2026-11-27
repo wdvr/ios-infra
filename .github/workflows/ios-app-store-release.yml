@@ -93,28 +93,33 @@ jobs:
     name: Generate Assets
     runs-on: ubuntu-latest
     if: ${{ inputs.generate_description || inputs.generate_release_notes }}
+    permissions:
+      contents: read
     outputs:
       description_generated: ${{ steps.generate.outputs.description }}
       release_notes_generated: ${{ steps.generate.outputs.release_notes }}
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0
+        persist-credentials: false
 
     - name: Setup Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: '3.11'
 
     - name: Install dependencies
-      run: pip install anthropic
+      run: pip install anthropic==2.3.0
 
     - name: Generate release notes
       if: ${{ inputs.generate_release_notes }}
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        APP_NAME: ${{ inputs.app_name }}
+        APP_CONTEXT: ${{ inputs.app_context }}
       run: |
         # Inline release notes generation
         python3 << 'SCRIPT'
@@ -126,7 +131,7 @@ jobs:
         try:
             import anthropic
         except ImportError:
-            subprocess.check_call(["pip", "install", "anthropic"])
+            subprocess.check_call(["pip", "install", "anthropic==2.3.0"])
             import anthropic
 
         def get_last_release_tag():
@@ -181,8 +186,8 @@ jobs:
         commits = get_commits_since_tag(last_tag)
         commit_text = "\n".join([f"- {c['subject']} ({c['date']})" for c in commits[:50]])
 
-        app_name = "${{ inputs.app_name }}"
-        app_context = "${{ inputs.app_context }}" or "An iOS app"
+        app_name = os.environ["APP_NAME"]
+        app_context = os.environ.get("APP_CONTEXT") or "An iOS app"
         # Use the minor version for the title (e.g., "2.1" not "2.1.1")
         display_version = f"{version_parts[0]}.{version_parts[1]}" if len(version_parts) >= 2 else app_version
 
@@ -227,6 +232,8 @@ jobs:
       if: ${{ inputs.generate_description }}
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        APP_NAME: ${{ inputs.app_name }}
+        APP_CONTEXT: ${{ inputs.app_context }}
       run: |
         # Inline description generation
         python3 << 'SCRIPT'
@@ -238,11 +245,11 @@ jobs:
             import anthropic
         except ImportError:
             import subprocess
-            subprocess.check_call(["pip", "install", "anthropic"])
+            subprocess.check_call(["pip", "install", "anthropic==2.3.0"])
             import anthropic
 
-        app_name = "${{ inputs.app_name }}"
-        app_context = "${{ inputs.app_context }}" or "An iOS app"
+        app_name = os.environ["APP_NAME"]
+        app_context = os.environ.get("APP_CONTEXT") or "An iOS app"
 
         client = anthropic.Anthropic()
         prompt = f"""You are writing an App Store description for {app_name}.
@@ -296,7 +303,7 @@ jobs:
         echo "release_notes=${{ inputs.generate_release_notes }}" >> $GITHUB_OUTPUT
 
     - name: Upload generated assets
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: generated-assets
         path: |
@@ -310,14 +317,18 @@ jobs:
     if: ${{ always() && !cancelled() }}
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 60
+    permissions:
+      contents: read
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
 
     - name: Download generated assets
       if: ${{ needs.generate-assets.result == 'success' }}
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: generated-assets
         path: fastlane/metadata/
@@ -382,10 +393,11 @@ jobs:
         fi
 
     - name: Setup App Store Connect API Key
+      env:
+        ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       run: |
-        mkdir -p ~/.private_keys
-        echo "${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}" > ~/.private_keys/AuthKey.p8
-        chmod 600 ~/.private_keys/AuthKey.p8
+        mkdir -p "$RUNNER_TEMP/private_keys"
+        (umask 077; printf '%s\n' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/private_keys/AuthKey.p8")
 
     - name: Keep App Store descriptions untouched
       if: ${{ !inputs.upload_description }}
@@ -399,7 +411,7 @@ jobs:
       env:
         APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        APP_STORE_CONNECT_KEY_PATH: ~/.private_keys/AuthKey.p8
+        APP_STORE_CONNECT_KEY_PATH: ${{ runner.temp }}/private_keys/AuthKey.p8
       run: |
         export PATH="/opt/homebrew/opt/ruby@3.2/bin:$PATH"
 
@@ -424,7 +436,7 @@ jobs:
 
     - name: Cleanup
       if: always()
-      run: rm -rf ~/.private_keys
+      run: rm -rf "$RUNNER_TEMP/private_keys"
 
   # Job 3: Tag release candidate
   tag-release:
@@ -435,7 +447,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0
 
@@ -464,9 +476,11 @@ jobs:
         echo "Created tag: $TAG"
 
     - name: Summary
+      env:
+        APP_NAME: ${{ inputs.app_name }}
       run: |
         echo "## App Store Release Preparation" >> $GITHUB_STEP_SUMMARY
-        echo "- **App**: ${{ inputs.app_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **App**: $APP_NAME" >> $GITHUB_STEP_SUMMARY
         echo "- **Bundle ID**: ${{ inputs.bundle_id }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Version**: ${{ inputs.app_version }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Build**: ${{ inputs.build_number }}" >> $GITHUB_STEP_SUMMARY

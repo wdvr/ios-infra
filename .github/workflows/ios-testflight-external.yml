@@ -41,18 +41,19 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0
 
     - name: Setup App Store Connect API Key
+      env:
+        ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
       run: |
-        mkdir -p ~/.private_keys
-        echo "${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}" > ~/.private_keys/AuthKey.p8
-        chmod 600 ~/.private_keys/AuthKey.p8
+        mkdir -p "$RUNNER_TEMP/private_keys"
+        (umask 077; printf '%s\n' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/private_keys/AuthKey.p8")
 
     - name: Install dependencies
-      run: pip3 install PyJWT cryptography
+      run: pip3 install PyJWT==2.15.1 cryptography==50.0.2
 
     - name: Submit for External Review & Tag
       id: submit
@@ -60,6 +61,7 @@ jobs:
         APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         APP_BUNDLE_ID: ${{ inputs.bundle_id }}
+        WHATS_NEW: ${{ inputs.whats_new }}
       run: |
         JWT=$(python3 -c "
         import jwt, time, os
@@ -70,7 +72,7 @@ jobs:
           'iat': int(time.time()),
           'exp': int(time.time()) + 1200,
           'aud': 'appstoreconnect-v1'
-        }, open(os.path.expanduser('~/.private_keys/AuthKey.p8')).read(),
+        }, open(os.path.join(os.environ['RUNNER_TEMP'], 'private_keys', 'AuthKey.p8')).read(),
         algorithm='ES256', headers={'kid': k}))
         ")
 
@@ -111,10 +113,16 @@ jobs:
         echo "build_number=$BUILD_VERSION" >> $GITHUB_OUTPUT
 
         # Add beta build localization
+        LOCALIZATION_BODY=$(BUILD_ID="$BUILD_ID" python3 -c "
+        import json, os
+        print(json.dumps({'data': {'type': 'betaBuildLocalizations',
+          'attributes': {'locale': 'en-US', 'whatsNew': os.environ['WHATS_NEW']},
+          'relationships': {'build': {'data': {'type': 'builds', 'id': os.environ['BUILD_ID']}}}}}))
+        ")
         curl -g -s -X POST \
           -H "Authorization: Bearer $JWT" \
           -H "Content-Type: application/json" \
-          -d "{\"data\":{\"type\":\"betaBuildLocalizations\",\"attributes\":{\"locale\":\"en-US\",\"whatsNew\":\"${{ inputs.whats_new }}\"},\"relationships\":{\"build\":{\"data\":{\"type\":\"builds\",\"id\":\"$BUILD_ID\"}}}}}" \
+          -d "$LOCALIZATION_BODY" \
           "https://api.appstoreconnect.apple.com/v1/betaBuildLocalizations" || true
 
         # Submit for beta review
@@ -132,6 +140,8 @@ jobs:
         fi
 
     - name: Create Git Tag
+      env:
+        WHATS_NEW: ${{ inputs.whats_new }}
       run: |
         BUILD="${{ steps.submit.outputs.build_number }}"
         TAG="testflight_build_$BUILD"
@@ -142,7 +152,7 @@ jobs:
         git tag -a "$TAG" -m "TestFlight external build $BUILD
 
         Submitted for external beta review.
-        What's new: ${{ inputs.whats_new }}
+        What's new: $WHATS_NEW
 
         Triggered by: ${{ github.actor }}"
 
@@ -162,4 +172,4 @@ jobs:
 
     - name: Cleanup
       if: always()
-      run: rm -rf ~/.private_keys
+      run: rm -rf "$RUNNER_TEMP/private_keys"

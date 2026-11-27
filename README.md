@@ -86,7 +86,6 @@ Configure these secrets in each app repository that uses the shared workflows.
 | `APP_STORE_CONNECT_PRIVATE_KEY` | App Store Connect private key (`.p8` file contents) |
 | `DISTRIBUTION_CERTIFICATE_BASE64` | Code signing certificate (base64-encoded `.p12` file) |
 | `DISTRIBUTION_CERTIFICATE_PASSWORD` | Password for the `.p12` certificate |
-| `KEYCHAIN_PASSWORD` | Temporary keychain password (any random string) |
 | `ANTHROPIC_API_KEY` | For AI content generation (optional) |
 
 ### How to Set Up Secrets
@@ -120,13 +119,17 @@ gh secret set DISTRIBUTION_CERTIFICATE_BASE64 --body "$(base64 -i Certificates.p
 gh secret set DISTRIBUTION_CERTIFICATE_PASSWORD --body "your-p12-password" --repo OWNER/REPO
 ```
 
-#### 3. Keychain Password
+#### 3. Signing Keychain Password (self-hosted runners)
 
-This is just a temporary password used to create a keychain during CI. Use any random string:
+The signing keychain (`~/ios-signing.keychain-db`) persists on each self-hosted Mac and is shared by every app, so its password is runner configuration, not a per-repo secret. Add it to the `.env` file of every runner on the Mac (and export it in the shell for `deploy.sh`):
 
 ```bash
-gh secret set KEYCHAIN_PASSWORD --body "$(openssl rand -base64 32)" --repo OWNER/REPO
+echo "IOS_SIGNING_KEYCHAIN_PASSWORD=$(openssl rand -base64 32)" >> ~/actions-runner/.env
 ```
+
+Then restart each runner service (`./svc.sh stop && ./svc.sh start` in the runner directory); the runner only reads `.env` at startup.
+
+On the next build, a keychain still using the old default password is re-keyed to this value, for every app on that Mac. Use the same value for all runners on one Mac, and only set it once every app built on that Mac calls a version of `ios-build.yml` that reads `IOS_SIGNING_KEYCHAIN_PASSWORD`; older versions only know the old default password and fail to sign after the re-key.
 
 #### 4. Anthropic API Key (Optional)
 
