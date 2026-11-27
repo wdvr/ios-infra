@@ -45,10 +45,14 @@ jobs:
 
     - name: Check every remote action is pinned to a full commit SHA
       run: |
+        # Run Python outside the checkout so a PR cannot shadow PyYAML with its own yaml.py.
+        cd "$RUNNER_TEMP"
         python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet --break-system-packages PyYAML==6.0.2
         python3 - <<'PY'
-        import glob, re, sys
+        import glob, os, re, sys
         import yaml
+
+        os.chdir(os.environ["GITHUB_WORKSPACE"])
 
         def uses_refs(node):
             if isinstance(node, dict):
